@@ -13,14 +13,14 @@ using namespace std::chrono;
  * the standard input according to the problem statement.
  **/
 
-template<class T>
+template<typename T>
 auto operator>>(std::istream & in, T& t) -> decltype(t.Read(in), in)
 {
     t.Read(in);
     return in;
 }
 
-template<class T>
+template<typename T>
 auto operator<<(std::ostream& os, const T& t) -> decltype(t.Print(os), os)
 {
     t.Print(os);
@@ -224,13 +224,22 @@ public:
         }
     }
 
+    void Reset()
+    {
+        m_myEntity = -1;
+        for (size_t i = 1; i < 8 + 1; i++)
+        {
+            m_bombsByRoundsToExplode[i].clear();
+        }
+        m_entitiesList.clear();
+    }
 
     //protected:
     int m_myId;
     int m_myEntity;
     std::vector<Entity> m_entitiesList;
 
-    typedef std::list<size_t> EntitiesPositions;
+    typedef std::vector<size_t> EntitiesPositions;
     std::vector<EntitiesPositions> m_bombsByRoundsToExplode;
 };
 
@@ -279,8 +288,6 @@ public:
         size_t bombsLeft = entitiesList.Me().bombsLeft;
         size_t range = entitiesList.Me().explosionRange;
 
-        CalcExplosions();
-
         //for (int y = 0; y < m_height; y++) {
         //    for (int x = 0; x < m_width; x++) {
         //        if (m_grid.IsBox(x,y))
@@ -290,6 +297,23 @@ public:
         //        }
         //    }
         //}
+    }
+    
+    void Reset()
+    {
+        CellSituation defaultSituation;
+        for (auto row : m_gridSituation)
+        {
+            for (auto cell : row)
+            {
+                cell = defaultSituation;
+            }
+        }
+    }
+
+    void Analyze()
+    {
+        CalcExplosions();
     }
 
     //void AddEntity(Entity &e)
@@ -368,12 +392,19 @@ protected:
 
     int max;
 
+    template <typename T>
+    void EraseFromVector(std::vector<T> &vec, const T &value)
+    {
+        vec.erase(std::remove(vec.begin(), vec.end(), value), vec.end());
+    }
+
     void BombExplodesBomb(const Entity &bomb1, Entity &bomb2)
     {
         cerr << "BombExplodesBomb, rounds: " << bomb2.roundsToExplode << "->" << bomb1.roundsToExplode << endl;
         if (bomb1.roundsToExplode >= bomb2.roundsToExplode)
             throw std::exception();
-        m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].remove(bomb2.entityOrder);
+        EraseFromVector<size_t>(m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode], bomb2.entityOrder);
+        //m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].remove(bomb2.entityOrder);
         bomb2.roundsToExplode = bomb1.roundsToExplode;
         m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
     }
@@ -513,7 +544,8 @@ int main()
         int entities;
         cin >> entities; cin.ignore();
 
-        Entities entitiesList(myId);
+        static Entities entitiesList(myId);
+        entitiesList.Reset();
 
         for (int i = 0; i < entities; i++) {
             Entity e;
@@ -532,7 +564,9 @@ int main()
 
 
         high_resolution_clock::time_point timeHaveInput = high_resolution_clock::now();
-        GridCostEstimator gridCost(grid, entitiesList);
+        static GridCostEstimator gridCost(grid, entitiesList);
+        gridCost.Reset();
+        gridCost.Analyze();
         cerr << gridCost;
 
         // Write an action using cout. DON'T FORGET THE "<< endl"
