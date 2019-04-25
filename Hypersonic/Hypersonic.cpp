@@ -176,24 +176,23 @@ public:
 
         if (Bomb == e.type)
         {
-            m_bombsByRoundsToExplode[e.explosionRange].push_back(e.entityOrder);
             //bool myBomb = (m_myId == e.owner);
             try
             {
                 //sorry, cannot guarantee order of the bombs in the list (we move bombs in the middle of checking them).=
                 //if (myBomb)
                 //{
-                //    m_bombsByRoundsToExplode[e.explosionRange].push_front(e.entityOrder);
+                //    m_bombsByRoundsToExplode[e.roundsToExplode].push_front(e.entityOrder);
                 //}
                 //else
                 //{
-                    m_bombsByRoundsToExplode[e.explosionRange].push_back(e.entityOrder);
+                    m_bombsByRoundsToExplode[e.roundsToExplode].push_back(e.entityOrder);
                 //}
             }
             catch (...)
             {
-                cerr << "e.explosionRange = " << e.explosionRange << endl;
-                cerr << "m_bombsByRoundsToExplode[e.param1].size() = " << m_bombsByRoundsToExplode[e.explosionRange].size() << endl;
+                cerr << "e.roundsToExplode = " << e.roundsToExplode << endl;
+                cerr << "m_bombsByRoundsToExplode[e.roundsToExplode].size() = " << m_bombsByRoundsToExplode[e.roundsToExplode].size() << endl;
                 throw;
             }
 
@@ -302,12 +301,17 @@ public:
     void Reset()
     {
         CellSituation defaultSituation;
-        for (auto row : m_gridSituation)
+        for (GridSituation::iterator row = m_gridSituation.begin(); row != m_gridSituation.end(); row++)
+
         {
-            for (auto cell : row)
+            //cerr << "clear row: ";
+            for (RowSituation::iterator cell = row->begin(); cell != row->end(); cell++)
+                //for (auto cell : row)
             {
-                cell = defaultSituation;
+                *cell = defaultSituation;
+                //cerr << (cell.m_roundsToExplode > 9 ) ? '.' : cell.m_roundsToExplode;
             }
+            //cerr << endl;
         }
     }
 
