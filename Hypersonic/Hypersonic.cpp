@@ -122,11 +122,23 @@ const int ENTITY_TYPE_ITEM = 2;
 struct Entity
 {
     int entityType;
-    int owner;
+
+    int owner; //id of the player | bomb's owner
     int x;
     int y;
-    int param1;
-    int param2;
+    union
+    {
+        int param1;                 
+        int bombsLeft;              //For players: number of bombs the player can still place.
+        int roundsBeforeExposion;   //For bombs: number of rounds left until the bomb explodes.
+        int itemType;               //For items: the integer representing the item.
+    };
+    union
+    {
+        int param2;                 //For players : current explosion range of the player's bombs.
+        int explosionRange;         //For bombs: current explosion range of the bomb.
+    };
+
     void Print(std::ostream& os) const
     {
         os << "entityType=" << entityType
@@ -162,17 +174,17 @@ public:
             {
                 if (myBomb)
                 {
-                    m_bombsByRoundsToExplode[e.param1].push_front(entityOrder);
+                    m_bombsByRoundsToExplode[e.explosionRange].push_front(entityOrder);
                 }
                 else
                 {
-                    m_bombsByRoundsToExplode[e.param1].push_back(entityOrder);
+                    m_bombsByRoundsToExplode[e.explosionRange].push_back(entityOrder);
                 }
             }
             catch (...)
             {
-                cerr << "e.param1 = " << e.param1 << endl;
-                cerr << "m_bombsByRoundsToExplode[e.param1].size() = " << m_bombsByRoundsToExplode[e.param1].size() << endl;
+                cerr << "e.explosionRange = " << e.explosionRange << endl;
+                cerr << "m_bombsByRoundsToExplode[e.param1].size() = " << m_bombsByRoundsToExplode[e.explosionRange].size() << endl;
                 throw;
             }
 
@@ -255,8 +267,8 @@ public:
         , zeroRowSituation(m_width)
         , m_gridSituation(m_height, zeroRowSituation)
     {
-        size_t bombsLeft = entitiesList.Me().param1;
-        size_t range = entitiesList.Me().param2;
+        size_t bombsLeft = entitiesList.Me().bombsLeft;
+        size_t range = entitiesList.Me().explosionRange;
 
         CalcExplosions();
 
@@ -347,8 +359,64 @@ protected:
 
     int max;
 
+    void CalcExplosionDirection(int dx, int dy, const Entity &bombEntity)
+    {
+        bool myBomb = (m_entitiesList.m_myId == bombEntity.owner);
+
+        //DEBUG cerr << "bomb @ " << bombEntity.x << " " << bombEntity.y << " dx,dy=" << dx << "," << dy;
+        for (int r = 1; r < bombEntity.explosionRange; r++)
+        {
+            //DEBUG cerr << " r";
+            int explodedX = bombEntity.x + dx * r;
+            int explodedY = bombEntity.y + dy * r;
+            if (explodedX < 0 || explodedX >= m_width || explodedY < 0 || explodedY >= m_height)
+            {
+                break;
+            }
+            CellSituation &situation = m_gridSituation[explodedY][explodedX];
+
+            //DEBUG cerr << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
+
+            if (CELL_WALL == m_grid.m_grid[explodedY][explodedX])
+            {
+                break;
+            }
+            else //box or floor
+            {
+                if (bombEntity.roundsBeforeExposion <= situation.m_roundsToExplode)
+                {
+                    situation.m_roundsToExplode = bombEntity.roundsBeforeExposion;
+                    if (myBomb)
+                    {
+                        situation.m_selfBomb = true;
+                    }
+                }
+                if (CELL_FLOOR != m_grid.m_grid[explodedY][explodedX]) //box
+                {
+                    break;
+                }
+                else
+                {
+                    //TODO: check for other items and bombs
+                }
+            }
+            if (0 == dx && 0 == dy)
+            {
+                break; //check bomb position only once
+            }
+        }
+        //DEBUG cerr << endl;
+    }
+    
     void CalcExplosions()
     {
+        const std::vector<std::vector<int>> directions
+            = { {0, 0},  // bomb position
+                {-1, 0}, // dy=-1 dx= 0
+                {0, -1}, // dy= 0 dx=-1
+                {0, 1},  // dy= 0 dx=+1
+                {1, 0} };// dy=+1 dx= 0
+
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
             //bombs to explode in N rounds (we don't count 0 - they already exloded)
@@ -356,68 +424,12 @@ protected:
                 b != m_entitiesList.m_bombsByRoundsToExplode[rounds].end(); b++)
             {
                 const Entity &bombEntity = m_entitiesList.m_entitiesList[*b];
-                bool myBomb = (m_entitiesList.m_myId == bombEntity.owner);
-
-                int explosionRange = bombEntity.param2;
-
-                int dx = -1, dy = 0;
-                const std::vector<std::vector<int>> directions
-                    = { {0, 0},  // bomb position
-                        {-1, 0}, // dy=-1 dx= 0
-                        {0, -1}, // dy= 0 dx=-1
-                        {0, 1},  // dy= 0 dx=+1
-                        {1, 0} };// dy=+1 dx= 0
 
                 for (auto direction = directions.begin(); direction != directions.end(); direction++)
                 {
-                    dy = (*direction)[0];
-                    dx = (*direction)[1];
-                    //DEBUG cerr << "bomb @ " << bombEntity.x << " " << bombEntity.y << " dx,dy=" << dx << "," << dy;
-                    for (int r = 1; r < explosionRange; r++)
-                    {
-                        //DEBUG cerr << " r";
-                        int explodedX = bombEntity.x + dx*r;
-                        if (explodedX < 0 || explodedX >= m_width) break;
-                        int explodedY = bombEntity.y + dy*r;
-                        if (explodedY < 0 || explodedY >= m_height) break;
-                        CellSituation &situation = m_gridSituation[explodedY][explodedX];
-
-                        //DEBUG cerr << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
-
-                        if (CELL_FLOOR == m_grid.m_grid[explodedY][explodedX])
-                        {
-                            if (rounds <= situation.m_roundsToExplode)
-                            {
-                                situation.m_roundsToExplode = rounds;
-                                if (myBomb)
-                                {
-                                    situation.m_selfBomb = true;
-                                }
-                            }
-                        }
-                        else if (CELL_WALL == m_grid.m_grid[explodedY][explodedX])
-                        {
-                            break;
-                        }
-                        else //box?
-                        {
-                            //avoid copy-past from CELL_FLOOR
-                            if (rounds <= situation.m_roundsToExplode)
-                            {
-                                situation.m_roundsToExplode = rounds;
-                                if (myBomb)
-                                {
-                                    situation.m_selfBomb = true;
-                                }
-                            }
-                            break;
-                        }
-                        if (direction == directions.begin())
-                        {
-                            break; //check bomb position only once
-                        }
-                    }
-                    //DEBUG cerr << endl;
+                    int dy = (*direction)[0];
+                    int dx = (*direction)[1];
+                    CalcExplosionDirection(dx, dy, bombEntity);
                 }
             }
         }
