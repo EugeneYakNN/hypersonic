@@ -115,14 +115,20 @@ class GameState
 
 };
 
-const int ENTITY_TYPE_PLAYER = 0;
-const int ENTITY_TYPE_BOMB = 1;
-const int ENTITY_TYPE_ITEM = 2;
+enum EntityType
+{
+    Player = 0,
+    Bomb = 1,
+    Item = 2
+};
 
 struct Entity
 {
-    int entityType;
-
+    union
+    {
+        int entityType;
+        EntityType type;
+    };
     int owner; //id of the player | bomb's owner
     int x;
     int y;
@@ -130,7 +136,7 @@ struct Entity
     {
         int param1;                 
         int bombsLeft;              //For players: number of bombs the player can still place.
-        int roundsBeforeExposion;   //For bombs: number of rounds left until the bomb explodes.
+        int roundsToExplode;   //For bombs: number of rounds left until the bomb explodes.
         int itemType;               //For items: the integer representing the item.
     };
     union
@@ -148,6 +154,7 @@ struct Entity
            << " param1=" << param1
            << " param2=" << param2;
     }
+    int entityOrder;
 };
 
 class Entities
@@ -158,28 +165,30 @@ public:
         , m_myEntity(-1)
         , m_bombsByRoundsToExplode(8 + 1)
     {}
-    void AddEntity(const Entity &e)
+    void AddEntity(Entity &e)
     {
-        size_t entityOrder = m_entitiesList.size();
-        if (ENTITY_TYPE_PLAYER == e.entityType && m_myId == e.owner)
+        e.entityOrder = m_entitiesList.size();
+        if (Player == e.type && m_myId == e.owner)
         {
-            m_myEntity = entityOrder;
+            m_myEntity = e.entityOrder;
         }
         m_entitiesList.push_back(e);
 
-        if (ENTITY_TYPE_BOMB == e.entityType)
+        if (Bomb == e.type)
         {
-            bool myBomb = (m_myId == e.owner);
+            m_bombsByRoundsToExplode[e.explosionRange].push_back(e.entityOrder);
+            //bool myBomb = (m_myId == e.owner);
             try
             {
-                if (myBomb)
-                {
-                    m_bombsByRoundsToExplode[e.explosionRange].push_front(entityOrder);
-                }
-                else
-                {
-                    m_bombsByRoundsToExplode[e.explosionRange].push_back(entityOrder);
-                }
+                //sorry, cannot guarantee order of the bombs in the list (we move bombs in the middle of checking them).=
+                //if (myBomb)
+                //{
+                //    m_bombsByRoundsToExplode[e.explosionRange].push_front(e.entityOrder);
+                //}
+                //else
+                //{
+                    m_bombsByRoundsToExplode[e.explosionRange].push_back(e.entityOrder);
+                //}
             }
             catch (...)
             {
@@ -256,7 +265,7 @@ typedef std::vector<RowSituation> GridSituation;
 class GridCostEstimator
 {
 public:
-    GridCostEstimator(const Grid &grid, const Entities &entitiesList)
+    GridCostEstimator(const Grid &grid, Entities &entitiesList)
         : m_grid(grid)
         , m_width(m_grid.m_width)
         , m_height(m_grid.m_height)
@@ -285,7 +294,7 @@ public:
 
     //void AddEntity(Entity &e)
     //{
-    //    if (ENTITY_TYPE_BOMB == e.entityType)
+    //    if (Bomb == e.type)
     //}
 
     void AddBox(size_t boxX, size_t boxY, size_t bombRange)
@@ -353,11 +362,21 @@ protected:
 
     const CellRowCost m_zeroRow;
     GridCost m_gridCost;
-    const Entities &m_entitiesList;
+    Entities &m_entitiesList; //will modify (less rounds to explode bombs)
     //std::vector<Entity> m_entitiesList;
 
 
     int max;
+
+    void BombExplodesBomb(const Entity &bomb1, Entity &bomb2)
+    {
+        cerr << "BombExplodesBomb, rounds: " << bomb2.roundsToExplode << "->" << bomb1.roundsToExplode << endl;
+        if (bomb1.roundsToExplode >= bomb2.roundsToExplode)
+            throw std::exception();
+        m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].remove(bomb2.entityOrder);
+        bomb2.roundsToExplode = bomb1.roundsToExplode;
+        m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
+    }
 
     void CalcExplosionDirection(int dx, int dy, const Entity &bombEntity)
     {
@@ -383,9 +402,9 @@ protected:
             }
             else //box or floor
             {
-                if (bombEntity.roundsBeforeExposion <= situation.m_roundsToExplode)
+                if (bombEntity.roundsToExplode <= situation.m_roundsToExplode)
                 {
-                    situation.m_roundsToExplode = bombEntity.roundsBeforeExposion;
+                    situation.m_roundsToExplode = bombEntity.roundsToExplode;
                     if (myBomb)
                     {
                         situation.m_selfBomb = true;
@@ -397,6 +416,21 @@ protected:
                 }
                 else
                 {
+                    for (auto entity : m_entitiesList.m_entitiesList)
+                    {
+                        if (entity.x == explodedX && entity.y == explodedY) //bomb explodes otther entity
+                        {
+                            if (Item == entity.type)
+                            {
+                                break;
+                            }
+                            else if (Bomb == entity.type
+                                && bombEntity.roundsToExplode < entity.roundsToExplode)
+                            {
+                                BombExplodesBomb(bombEntity, entity); // will move it to the end of list of bombs exploding earlier
+                            }
+                        }
+                    }
                     //TODO: check for other items and bombs
                 }
             }
@@ -412,24 +446,22 @@ protected:
     {
         const std::vector<std::vector<int>> directions
             = { {0, 0},  // bomb position
-                {-1, 0}, // dy=-1 dx= 0
-                {0, -1}, // dy= 0 dx=-1
-                {0, 1},  // dy= 0 dx=+1
-                {1, 0} };// dy=+1 dx= 0
+                {-1, 0}, // dy=-1 dx= 0 up
+                {0, -1}, // dy= 0 dx=-1 left
+                {0, 1},  // dy= 0 dx=+1 right
+                {1, 0} };// dy=+1 dx= 0 down
 
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
             //bombs to explode in N rounds (we don't count 0 - they already exloded)
             for (auto b = m_entitiesList.m_bombsByRoundsToExplode[rounds].begin();
-                b != m_entitiesList.m_bombsByRoundsToExplode[rounds].end(); b++)
+                b != m_entitiesList.m_bombsByRoundsToExplode[rounds].end(); b++) //it is expected that the list may be extended in the middle
             {
                 const Entity &bombEntity = m_entitiesList.m_entitiesList[*b];
 
                 for (auto direction = directions.begin(); direction != directions.end(); direction++)
                 {
-                    int dy = (*direction)[0];
-                    int dx = (*direction)[1];
-                    CalcExplosionDirection(dx, dy, bombEntity);
+                    CalcExplosionDirection((*direction)[0], (*direction)[1], bombEntity);
                 }
             }
         }
@@ -496,7 +528,7 @@ int main()
             cin.ignore();
         }
 
-        cerr << entitiesList;
+        //cerr << entitiesList;
 
 
         high_resolution_clock::time_point timeHaveInput = high_resolution_clock::now();
