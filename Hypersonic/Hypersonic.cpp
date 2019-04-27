@@ -5,8 +5,39 @@
 #include <algorithm>
 #include <chrono>
 
-using namespace std;
 using namespace std::chrono;
+
+#ifdef _WIN32
+inline std::istream &in()
+{
+    return std::cin;
+}
+
+inline std::ostream &debug()
+{
+    return std::cerr;
+}
+
+inline std::ostream &command()
+{
+    return std::cout;
+}
+#else
+inline std::istream &in()
+{
+    return std::cin;
+}
+
+inline std::ostream &debug()
+{
+    return std::cerr;
+}
+
+inline std::ostream &command()
+{
+    return std::cout;
+}
+#endif
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -52,10 +83,14 @@ void clip(T &value, T min, T max)
     }
 }
 
-struct Cell
+struct Position
 {
     int x;
     int y;
+    void Print(std::ostream& os) const
+    {
+        os << x << " " << y << std::endl;
+    }
 };
 
 const char CELL_FLOOR = '.';
@@ -69,7 +104,7 @@ public:
         , m_height(height)
     {
     }
-    void ReadRow(const string &row)
+    void ReadRow(const std::string &row)
     {
         m_grid.push_back(row);
     }
@@ -91,7 +126,7 @@ public:
             || IsBoxSafeCheck(x, y - 1) || IsBoxSafeCheck(x, y + 1);
     }
 
-    std::vector<string> m_grid;
+    std::vector<std::string> m_grid;
     const size_t m_width;
     const size_t m_height;
 protected:
@@ -130,30 +165,40 @@ struct Entity
         EntityType type;
     };
     int owner; //id of the player | bomb's owner
-    int x;
-    int y;
+    Position pos;
     union
     {
         int param1;                 
-        int bombsLeft;              //For players: number of bombs the player can still place.
-        int roundsToExplode;   //For bombs: number of rounds left until the bomb explodes.
-        int itemType;               //For items: the integer representing the item.
+        int bombsLeft;          //For players: number of bombs the player can still place.
+        int roundsToExplode;    //For bombs: number of rounds left until the bomb explodes.
+        int itemType;           //For items: the integer representing the item.
     };
     union
     {
-        int param2;                 //For players : current explosion range of the player's bombs.
-        int explosionRange;         //For bombs: current explosion range of the bomb.
+        int param2;             //For players : current explosion range of the player's bombs.
+        int explosionRange;     //For bombs: current explosion range of the bomb.
     };
 
     void Print(std::ostream& os) const
     {
         os << "entityType=" << entityType
            << " owner=" << owner
-           << " x=" << x
-           << " y=" << y
+           << " x=" << pos.x
+           << " y=" << pos.y
            << " param1=" << param1
            << " param2=" << param2;
     }
+
+    void Read(std::istream & in)
+    {
+        in >> entityType
+           >> owner
+           >> pos.x
+           >> pos.y
+           >> param1
+           >> param2;
+    }
+
     int entityOrder;
 };
 
@@ -191,8 +236,8 @@ public:
             }
             catch (...)
             {
-                cerr << "e.roundsToExplode = " << e.roundsToExplode << endl;
-                cerr << "m_bombsByRoundsToExplode[e.roundsToExplode].size() = " << m_bombsByRoundsToExplode[e.roundsToExplode].size() << endl;
+                debug() << "e.roundsToExplode = " << e.roundsToExplode << std::endl;
+                debug() << "m_bombsByRoundsToExplode[e.roundsToExplode].size() = " << m_bombsByRoundsToExplode[e.roundsToExplode].size() << std::endl;
                 throw;
             }
 
@@ -205,21 +250,21 @@ public:
     }
     void Print(std::ostream& os) const
     {
-        os << "----Entities (" << m_entitiesList.size() << ") :-------------------" << endl;
-        os << "Bombs to explode in rounds:" << endl;
+        os << "----Entities (" << m_entitiesList.size() << ") :-------------------" << std::endl;
+        os << "Bombs to explode in rounds:" << std::endl;
         for (size_t i = 1; i < 8 + 1; i++)
         {
             os << i << " (" << m_bombsByRoundsToExplode[i].size() << ") :";
             for (auto b = m_bombsByRoundsToExplode[i].begin(); b != m_bombsByRoundsToExplode[i].end(); b++)
             {
                 const Entity &bombEntity = m_entitiesList[*b];
-                if (bombEntity.x > 12 || bombEntity.y > 10)
+                if (bombEntity.pos.x > 12 || bombEntity.pos.y > 10)
                 {
-                    cerr << "----ERROR: *b=" << *b << " " << bombEntity << endl;
+                    debug() << "----ERROR: *b=" << *b << " " << bombEntity << std::endl;
                 }
-                os << " @ " << bombEntity.x << " " << bombEntity.y;
+                os << " @ " << bombEntity.pos;
             }
-            os << endl;
+            os << std::endl;
         }
     }
 
@@ -269,6 +314,23 @@ public:
 typedef std::vector<CellSituation> RowSituation;
 typedef std::vector<RowSituation> GridSituation;
 
+class GridSituationPos : public GridSituation //TODO: replace inheritance with aggregation
+{
+public:
+    CellSituation Pos(Position pos) const { return at(pos.y).at(pos.x); }
+    CellSituation & Pos(Position pos) { return at(pos.y).at(pos.x); }
+
+    //unsigned long operator[](Position pos) const { return Pos(pos); }
+    //unsigned long & operator[](Position pos) { return Pos(pos); }
+
+    GridSituationPos(Position size)
+        : zeroRowSituation(size.x)
+        , GridSituation(size.y, zeroRowSituation)
+    {
+    }
+protected:
+    const RowSituation zeroRowSituation;
+};
 
 class GridCostEstimator
 {
@@ -304,14 +366,14 @@ public:
         for (GridSituation::iterator row = m_gridSituation.begin(); row != m_gridSituation.end(); row++)
 
         {
-            //cerr << "clear row: ";
+            //debug() << "clear row: ";
             for (RowSituation::iterator cell = row->begin(); cell != row->end(); cell++)
                 //for (auto cell : row)
             {
                 *cell = defaultSituation;
-                //cerr << (cell.m_roundsToExplode > 9 ) ? '.' : cell.m_roundsToExplode;
+                //debug() << (cell.m_roundsToExplode > 9 ) ? '.' : cell.m_roundsToExplode;
             }
-            //cerr << endl;
+            //debug() << std::endl;
         }
     }
 
@@ -368,14 +430,30 @@ public:
 
     void Print(std::ostream& os) const
     {
-        for (int y = 0; y < m_height; y++) {
+        for (int y = 0; y < m_height; y++)
+        {
+            for (int x = 0; x < m_width; x++)
+            {
+                if (m_gridSituation[y][x].m_roundsToExplode > 9)
+                {
+                    os << ". ";
+                }
+                else
+                {
+                    os << m_gridSituation[y][x].m_roundsToExplode << " ";
+                }
+            }
+
+            os << "|";
+
             for (int x = 0; x < m_width; x++) {
                 os << m_gridCost[y][x] << " ";
             }
-            os << endl;
+            os << std::endl;
         }
     }
-    Cell maxCell;
+
+    Position maxCell;
 
 protected:
     const Grid &m_grid;
@@ -402,9 +480,9 @@ protected:
         vec.erase(std::remove(vec.begin(), vec.end(), value), vec.end());
     }
 
-    void BombExplodesBomb(const Entity &bomb1, Entity &bomb2)
+    void ChainReaction(const Entity &bomb1, Entity &bomb2) // Bomb explodes another bomb
     {
-        cerr << "BombExplodesBomb, rounds: " << bomb2.roundsToExplode << "->" << bomb1.roundsToExplode << endl;
+        debug() << "ChainReaction, rounds: " << bomb2.roundsToExplode << "->" << bomb1.roundsToExplode << std::endl;
         if (bomb1.roundsToExplode >= bomb2.roundsToExplode)
             throw std::exception();
         EraseFromVector<size_t>(m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode], bomb2.entityOrder);
@@ -413,68 +491,76 @@ protected:
         m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
     }
 
+    bool ExplosionMeetsObstacle(int explodedX, int explodedY, const Entity &bombEntity) //true means we need to break
+    {
+        Position exploded = { explodedX, explodedY };
+        CellSituation &situation = m_gridSituation[explodedY][explodedX];
+
+        //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
+
+        if (CELL_WALL == m_grid.m_grid[explodedY][explodedX])
+        {
+            return true;
+        }
+        else //box or floor
+        {
+            if (bombEntity.roundsToExplode <= situation.m_roundsToExplode)
+            {
+                situation.m_roundsToExplode = bombEntity.roundsToExplode;
+                if (m_entitiesList.m_myId == bombEntity.owner) //my bomb
+                {
+                    situation.m_selfBomb = true;
+                }
+            }
+            if (CELL_FLOOR != m_grid.m_grid[explodedY][explodedX]) //box
+            {
+                return true;
+            }
+            else
+            {
+                for (auto entity : m_entitiesList.m_entitiesList)
+                {
+                    if (entity.pos.x == explodedX && entity.pos.y == explodedY) //bomb explodes otther entity
+                    {
+                        if (Item == entity.type)
+                        {
+                            return true;
+                        }
+                        else if (Bomb == entity.type
+                            && bombEntity.roundsToExplode < entity.roundsToExplode)
+                        {
+                            ChainReaction(bombEntity, entity); // will move it to the end of list of bombs exploding earlier
+                        }
+                    }
+                }
+                //TODO: check for other items and bombs
+            }
+        }
+        return false;
+    }
+
     void CalcExplosionDirection(int dx, int dy, const Entity &bombEntity)
     {
-        bool myBomb = (m_entitiesList.m_myId == bombEntity.owner);
-
-        //DEBUG cerr << "bomb @ " << bombEntity.x << " " << bombEntity.y << " dx,dy=" << dx << "," << dy;
+        //DEBUG debug() << "bomb @ " << bombEntity.x << " " << bombEntity.y << " dx,dy=" << dx << "," << dy;
         for (int r = 1; r < bombEntity.explosionRange; r++)
         {
-            //DEBUG cerr << " r";
-            int explodedX = bombEntity.x + dx * r;
-            int explodedY = bombEntity.y + dy * r;
+            //DEBUG debug() << " r";
+            int explodedX = bombEntity.pos.x + dx * r;
+            int explodedY = bombEntity.pos.y + dy * r;
             if (explodedX < 0 || explodedX >= m_width || explodedY < 0 || explodedY >= m_height)
             {
                 break;
             }
-            CellSituation &situation = m_gridSituation[explodedY][explodedX];
-
-            //DEBUG cerr << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
-
-            if (CELL_WALL == m_grid.m_grid[explodedY][explodedX])
+            if (ExplosionMeetsObstacle(explodedX, explodedY, bombEntity))
             {
                 break;
-            }
-            else //box or floor
-            {
-                if (bombEntity.roundsToExplode <= situation.m_roundsToExplode)
-                {
-                    situation.m_roundsToExplode = bombEntity.roundsToExplode;
-                    if (myBomb)
-                    {
-                        situation.m_selfBomb = true;
-                    }
-                }
-                if (CELL_FLOOR != m_grid.m_grid[explodedY][explodedX]) //box
-                {
-                    break;
-                }
-                else
-                {
-                    for (auto entity : m_entitiesList.m_entitiesList)
-                    {
-                        if (entity.x == explodedX && entity.y == explodedY) //bomb explodes otther entity
-                        {
-                            if (Item == entity.type)
-                            {
-                                break;
-                            }
-                            else if (Bomb == entity.type
-                                && bombEntity.roundsToExplode < entity.roundsToExplode)
-                            {
-                                BombExplodesBomb(bombEntity, entity); // will move it to the end of list of bombs exploding earlier
-                            }
-                        }
-                    }
-                    //TODO: check for other items and bombs
-                }
             }
             if (0 == dx && 0 == dy)
             {
                 break; //check bomb position only once
             }
         }
-        //DEBUG cerr << endl;
+        //DEBUG debug() << std::endl;
     }
     
     void CalcExplosions()
@@ -500,30 +586,26 @@ protected:
                 }
             }
         }
-
-        for (int y = 0; y < m_height; y++) {
-            for (int x = 0; x < m_width; x++) {
-                if (m_gridSituation[y][x].m_roundsToExplode > 9)
-                {
-                    cerr << ". ";
-                }
-                else
-                {
-                    cerr << m_gridSituation[y][x].m_roundsToExplode << " ";
-                }
-            }
-            cerr << endl;
-        }
     }
-
 };
 
 int main()
 {
+#ifdef __APPLE__
+    debug() << "Mac OS" << std::endl;
+#elif __MINGW32__
+    debug() << "MingW @ Win" << std::endl;
+#elif __linux__
+    debug() << "Linux" << std::endl;
+#elif _WIN32
+    debug() << "Windows" << std::endl;
+#endif
+
+
     int width;
     int height;
     int myId;
-    cin >> width >> height >> myId; cin.ignore();
+    in() >> width >> height >> myId; in().ignore();
 
 
     // game loop
@@ -532,63 +614,58 @@ int main()
 
         Grid grid(width, height);
         for (int i = 0; i < height; i++) {
-            string row;
-            cin >> row; cin.ignore();
-            //cerr << row << endl;
+            std::string row;
+            in() >> row; in().ignore();
+            //debug() << row << std::endl;
             grid.ReadRow(row);
         }
 
         for (int x = 0; x < width; x++)
         {
-            cerr << "--";
+            debug() << "--";
         };
-        cerr << endl;
+        debug() << std::endl;
 
 
         int entities;
-        cin >> entities; cin.ignore();
+        in() >> entities; in().ignore();
 
         static Entities entitiesList(myId);
         entitiesList.Reset();
 
         for (int i = 0; i < entities; i++) {
             Entity e;
-            cin >> e.entityType
-                >> e.owner
-                >> e.x
-                >> e.y
-                >> e.param1
-                >> e.param2;
+            in() >> e;
             entitiesList.AddEntity(e);
-            //cerr << "" << i << ": " << e << " (entities: " << entitiesList.m_entitiesList.size() << ")" << endl;
-            cin.ignore();
+            //debug() << "" << i << ": " << e << " (entities: " << entitiesList.m_entitiesList.size() << ")" << std::endl;
+            in().ignore();
         }
 
-        //cerr << entitiesList;
+        //debug() << entitiesList;
 
 
         high_resolution_clock::time_point timeHaveInput = high_resolution_clock::now();
         static GridCostEstimator gridCost(grid, entitiesList);
         gridCost.Reset();
         gridCost.Analyze();
-        cerr << gridCost;
+        debug() << gridCost;
 
-        // Write an action using cout. DON'T FORGET THE "<< endl"
-        // To debug: cerr << "Debug messages..." << endl;
-        //vec.back().c
+        // Write an action using cout. DON'T FORGET THE "<< std::endl"
+        // To debug: debug() << "Debug messages..." << std::endl;
+
 
         //if (grid.IsBoxAround(entitiesList.Me().x, entitiesList.Me().y))
         //{
-        //    cout << "BOMB " << gridCost.maxCell.x << " " <<  gridCost.maxCell.y << endl;
+        //    command() << "BOMB " << gridCost.maxCell.x << " " <<  gridCost.maxCell.y << std::endl;
         //}
         //else
         {
-            cout << "MOVE " << gridCost.maxCell.x << " " << gridCost.maxCell.y << endl;
+            command() << "MOVE " << gridCost.maxCell.x << " " << gridCost.maxCell.y << std::endl;
         }
         high_resolution_clock::time_point timeHaveOutput = high_resolution_clock::now();
         long long readDuration = duration_cast<microseconds>(timeHaveInput - timeRoundBegin).count();
         long long thinkDuration = duration_cast<microseconds>(timeHaveOutput - timeHaveInput).count();
-        cerr << "read: " << readDuration / 1000 << "." << readDuration % 1000
-            << " ms; think: " << thinkDuration / 1000 << "." << thinkDuration % 1000 << " ms" << endl;
+        debug() << "read: " << readDuration / 1000 << "." << readDuration % 1000
+            << " ms; think: " << thinkDuration / 1000 << "." << thinkDuration % 1000 << " ms" << std::endl;
     }
 }
