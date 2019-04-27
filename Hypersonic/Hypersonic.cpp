@@ -77,7 +77,7 @@ struct Rules
     {
         in >> size.x >> size.y >> myId; in.ignore();
 #ifdef VERBOSE_INPUT
-        debug() << size.x << size.y << myId <<std::endl;
+        debug() << size.x << " " << size.y << " " << myId <<std::endl;
 #endif //#ifdef VERBOSE_INPUT
     }
 };
@@ -223,11 +223,12 @@ struct Entity
            >> param2;
 #ifdef VERBOSE_INPUT
         debug() << entityType
-            << owner
-            << pos.x
-            << pos.y
-            << param1
-            << param2;
+            << " " << owner
+            << " " << pos.x
+            << " " << pos.y
+            << " " << param1
+            << " " << param2
+            << std::endl;
 #endif //#ifdef VERBOSE_INPUT
         return in;
     }
@@ -302,6 +303,22 @@ public:
         return os;
     }
 
+    std::istream & Read(std::istream & in)
+    {
+        int entities;
+        in >> entities; in.ignore();
+#ifdef VERBOSE_INPUT
+        debug() << entities << std::endl;
+#endif //#ifdef VERBOSE_INPUT
+        for (int i = 0; i < entities; i++) {
+            Entity e;
+            in >> e;
+            AddEntity(e);
+            //debug() << " " << i << ": " << e << " (entities: " << entitiesList.m_entitiesList.size() << ")" << std::endl;
+            in.ignore();
+        }
+        return in;
+    }
     void Reset()
     {
         m_myEntity = -1;
@@ -622,6 +639,8 @@ protected:
 
 int main()
 {
+    debug() << "============start============" << std::endl;
+    
     Rules rules;
     in() >> rules;
 
@@ -630,24 +649,14 @@ int main()
     while (1) {
         std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
 
+        debug() << "============loop============" << std::endl;
         Grid grid(rules.size);
         in() >> grid;
 
-        int entities;
-        in() >> entities; in().ignore();
-
         static Entities entitiesList(rules.myId);
         entitiesList.Reset();
-
-        for (int i = 0; i < entities; i++) {
-            Entity e;
-            in() >> e;
-            entitiesList.AddEntity(e);
-            //debug() << "" << i << ": " << e << " (entities: " << entitiesList.m_entitiesList.size() << ")" << std::endl;
-            in().ignore();
-        }
-
-        //debug() << entitiesList;
+        in() >> entitiesList;
+        debug() << "======= have input =========" << std::endl;
 
 
         std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
