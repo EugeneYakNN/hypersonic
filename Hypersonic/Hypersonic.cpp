@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <chrono>
 
-using namespace std::chrono;
-
 #ifdef _WIN32
 inline std::istream &in()
 {
@@ -58,15 +56,25 @@ auto operator<<(std::ostream& os, const T& t) -> decltype(t.Print(os), os)
     return os;
 }
 
+struct Position
+{
+    int x;
+    int y;
+    void Print(std::ostream& os) const
+    {
+        os << x << " " << y << std::endl;
+    }
+};
+
 struct Rules
 {
-    int width;
-    int height;
+    Position size;
     int myId;
 
-    void Read(std::istream & in)
+    auto Read(std::istream & in)
     {
-        in >> width >> height >> myId; in.ignore();
+        in >> size.x >> size.y >> myId; in.ignore();
+        debug() << size.x << size.y << myId <<std::endl;
     }
 };
 
@@ -83,38 +91,44 @@ void clip(T &value, T min, T max)
     }
 }
 
-struct Position
-{
-    int x;
-    int y;
-    void Print(std::ostream& os) const
-    {
-        os << x << " " << y << std::endl;
-    }
-};
-
 const char CELL_FLOOR = '.';
 const char CELL_WALL = 'X';
 
 class Grid
 {
 public:
-    Grid(const int width, const int height)
-        : m_width(width)
-        , m_height(height)
+    Grid(Position size)
+        : m_size(size)
     {
     }
     void ReadRow(const std::string &row)
     {
         m_grid.push_back(row);
     }
+
+    std::istream & Read(std::istream & in)
+    {
+        for (int i = 0; i < m_size.y; i++) {
+            std::string row;
+            in >> row; in.ignore();
+            //debug() << row << std::endl;
+            ReadRow(row);
+        }
+        for (int x = 0; x < m_size.x; x++)
+        {
+            debug() << "--";
+        };
+        debug() << std::endl;
+        return in;
+    }
+
     bool IsBox(int x, int y) const
     {
         return CELL_FLOOR != m_grid[y][x] && CELL_WALL != m_grid[y][x];
     }
     bool IsBoxSafeCheck(int x, int y) const
     {
-        if (x < 0 || x >= m_width || y < 0 || y >= m_height)
+        if (x < 0 || x >= m_size.x || y < 0 || y >= m_size.y)
             return false;
         else
             return IsBox(x, y);
@@ -127,8 +141,7 @@ public:
     }
 
     std::vector<std::string> m_grid;
-    const size_t m_width;
-    const size_t m_height;
+    Position m_size;
 protected:
 };
 
@@ -189,7 +202,7 @@ struct Entity
            << " param2=" << param2;
     }
 
-    void Read(std::istream & in)
+    std::istream & Read(std::istream & in)
     {
         in >> entityType
            >> owner
@@ -197,6 +210,7 @@ struct Entity
            >> pos.y
            >> param1
            >> param2;
+        return in;
     }
 
     int entityOrder;
@@ -337,14 +351,12 @@ class GridCostEstimator
 public:
     GridCostEstimator(const Grid &grid, Entities &entitiesList)
         : m_grid(grid)
-        , m_width(m_grid.m_width)
-        , m_height(m_grid.m_height)
-        , m_zeroRow(m_width, 0)
-        , m_gridCost(m_height, m_zeroRow)
+        , m_zeroRow(m_grid.m_size.x, 0)
+        , m_gridCost(m_grid.m_size.y, m_zeroRow)
         , m_entitiesList(entitiesList)
         , max(0)
-        , zeroRowSituation(m_width)
-        , m_gridSituation(m_height, zeroRowSituation)
+        , zeroRowSituation(m_grid.m_size.x)
+        , m_gridSituation(m_grid.m_size.y, zeroRowSituation)
     {
         size_t bombsLeft = entitiesList.Me().bombsLeft;
         size_t range = entitiesList.Me().explosionRange;
@@ -390,12 +402,12 @@ public:
     void AddBox(size_t boxX, size_t boxY, size_t bombRange)
     {
         int rangeX[2] = { boxX - bombRange + 1, boxX + bombRange - 1 };
-        clip<int>(rangeX[0], 0, m_width);
-        clip<int>(rangeX[1], 0, m_width);
+        clip<int>(rangeX[0], 0, m_grid.m_size.x);
+        clip<int>(rangeX[1], 0, m_grid.m_size.x);
 
         int rangeY[2] = { boxY - bombRange + 1, boxY + bombRange - 1 };
-        clip<int>(rangeY[0], 0, m_height);
-        clip<int>(rangeY[1], 0, m_height);
+        clip<int>(rangeY[0], 0, m_grid.m_size.y);
+        clip<int>(rangeY[1], 0, m_grid.m_size.y);
 
         for (int x = rangeX[0]; x < rangeX[1]; x++) {
             int y = boxY;
@@ -430,9 +442,9 @@ public:
 
     void Print(std::ostream& os) const
     {
-        for (int y = 0; y < m_height; y++)
+        for (int y = 0; y < m_grid.m_size.y; y++)
         {
-            for (int x = 0; x < m_width; x++)
+            for (int x = 0; x < m_grid.m_size.x; x++)
             {
                 if (m_gridSituation[y][x].m_roundsToExplode > 9)
                 {
@@ -446,7 +458,7 @@ public:
 
             os << "|";
 
-            for (int x = 0; x < m_width; x++) {
+            for (int x = 0; x < m_grid.m_size.x; x++) {
                 os << m_gridCost[y][x] << " ";
             }
             os << std::endl;
@@ -457,8 +469,6 @@ public:
 
 protected:
     const Grid &m_grid;
-    const size_t m_width;
-    const size_t m_height;
 
     typedef std::vector<int> CellRowCost;
     typedef std::vector<CellRowCost> GridCost;
@@ -547,7 +557,7 @@ protected:
             //DEBUG debug() << " r";
             int explodedX = bombEntity.pos.x + dx * r;
             int explodedY = bombEntity.pos.y + dy * r;
-            if (explodedX < 0 || explodedX >= m_width || explodedY < 0 || explodedY >= m_height)
+            if (explodedX < 0 || explodedX >= m_grid.m_size.x || explodedY < 0 || explodedY >= m_grid.m_size.y)
             {
                 break;
             }
@@ -601,36 +611,21 @@ int main()
     debug() << "Windows" << std::endl;
 #endif
 
-
-    int width;
-    int height;
-    int myId;
-    in() >> width >> height >> myId; in().ignore();
+    Rules rules;
+    in() >> rules;
 
 
     // game loop
     while (1) {
-        high_resolution_clock::time_point timeRoundBegin = high_resolution_clock::now();
+        std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
 
-        Grid grid(width, height);
-        for (int i = 0; i < height; i++) {
-            std::string row;
-            in() >> row; in().ignore();
-            //debug() << row << std::endl;
-            grid.ReadRow(row);
-        }
-
-        for (int x = 0; x < width; x++)
-        {
-            debug() << "--";
-        };
-        debug() << std::endl;
-
+        Grid grid(rules.size);
+        in() >> grid;
 
         int entities;
         in() >> entities; in().ignore();
 
-        static Entities entitiesList(myId);
+        static Entities entitiesList(rules.myId);
         entitiesList.Reset();
 
         for (int i = 0; i < entities; i++) {
@@ -644,7 +639,7 @@ int main()
         //debug() << entitiesList;
 
 
-        high_resolution_clock::time_point timeHaveInput = high_resolution_clock::now();
+        std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
         static GridCostEstimator gridCost(grid, entitiesList);
         gridCost.Reset();
         gridCost.Analyze();
@@ -662,9 +657,9 @@ int main()
         {
             command() << "MOVE " << gridCost.maxCell.x << " " << gridCost.maxCell.y << std::endl;
         }
-        high_resolution_clock::time_point timeHaveOutput = high_resolution_clock::now();
-        long long readDuration = duration_cast<microseconds>(timeHaveInput - timeRoundBegin).count();
-        long long thinkDuration = duration_cast<microseconds>(timeHaveOutput - timeHaveInput).count();
+        std::chrono::high_resolution_clock::time_point timeHaveOutput = std::chrono::high_resolution_clock::now();
+        long long readDuration = std::chrono::duration_cast<std::chrono::microseconds>(timeHaveInput - timeRoundBegin).count();
+        long long thinkDuration = std::chrono::duration_cast<std::chrono::microseconds>(timeHaveOutput - timeHaveInput).count();
         debug() << "read: " << readDuration / 1000 << "." << readDuration % 1000
             << " ms; think: " << thinkDuration / 1000 << "." << thinkDuration % 1000 << " ms" << std::endl;
     }
