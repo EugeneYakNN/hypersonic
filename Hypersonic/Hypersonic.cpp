@@ -21,6 +21,7 @@ inline std::ostream &command()
     return std::cout;
 }
 #else
+#define VERBOSE_INPUT
 inline std::istream &in()
 {
     return std::cin;
@@ -60,9 +61,10 @@ struct Position
 {
     int x;
     int y;
-    void Print(std::ostream& os) const
+    std::ostream& Print(std::ostream& os) const
     {
         os << x << " " << y << std::endl;
+        return os;
     }
 };
 
@@ -74,7 +76,9 @@ struct Rules
     auto Read(std::istream & in)
     {
         in >> size.x >> size.y >> myId; in.ignore();
+#ifdef VERBOSE_INPUT
         debug() << size.x << size.y << myId <<std::endl;
+#endif //#ifdef VERBOSE_INPUT
     }
 };
 
@@ -91,8 +95,12 @@ void clip(T &value, T min, T max)
     }
 }
 
-const char CELL_FLOOR = '.';
-const char CELL_WALL = 'X';
+enum CellType
+{
+    Floor = '.',
+    Wall = 'X'
+    //numbers are boxes
+};
 
 class Grid
 {
@@ -111,7 +119,9 @@ public:
         for (int i = 0; i < m_size.y; i++) {
             std::string row;
             in >> row; in.ignore();
-            //debug() << row << std::endl;
+#ifdef VERBOSE_INPUT
+            debug() << row << std::endl;
+#endif //#ifdef VERBOSE_INPUT
             ReadRow(row);
         }
         for (int x = 0; x < m_size.x; x++)
@@ -124,7 +134,7 @@ public:
 
     bool IsBox(int x, int y) const
     {
-        return CELL_FLOOR != m_grid[y][x] && CELL_WALL != m_grid[y][x];
+        return Floor != m_grid[y][x] && Wall!= m_grid[y][x];
     }
     bool IsBoxSafeCheck(int x, int y) const
     {
@@ -192,7 +202,7 @@ struct Entity
         int explosionRange;     //For bombs: current explosion range of the bomb.
     };
 
-    void Print(std::ostream& os) const
+    std::ostream& Print(std::ostream& os) const
     {
         os << "entityType=" << entityType
            << " owner=" << owner
@@ -200,6 +210,7 @@ struct Entity
            << " y=" << pos.y
            << " param1=" << param1
            << " param2=" << param2;
+        return os;
     }
 
     std::istream & Read(std::istream & in)
@@ -210,6 +221,14 @@ struct Entity
            >> pos.y
            >> param1
            >> param2;
+#ifdef VERBOSE_INPUT
+        debug() << entityType
+            << owner
+            << pos.x
+            << pos.y
+            << param1
+            << param2;
+#endif //#ifdef VERBOSE_INPUT
         return in;
     }
 
@@ -262,7 +281,7 @@ public:
     {
         return m_entitiesList[m_myEntity];
     }
-    void Print(std::ostream& os) const
+    std::ostream& Print(std::ostream& os) const
     {
         os << "----Entities (" << m_entitiesList.size() << ") :-------------------" << std::endl;
         os << "Bombs to explode in rounds:" << std::endl;
@@ -280,6 +299,7 @@ public:
             }
             os << std::endl;
         }
+        return os;
     }
 
     void Reset()
@@ -440,7 +460,7 @@ public:
         }
     }
 
-    void Print(std::ostream& os) const
+    std::ostream& Print(std::ostream& os) const
     {
         for (int y = 0; y < m_grid.m_size.y; y++)
         {
@@ -463,6 +483,7 @@ public:
             }
             os << std::endl;
         }
+        return os;
     }
 
     Position maxCell;
@@ -508,7 +529,7 @@ protected:
 
         //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
 
-        if (CELL_WALL == m_grid.m_grid[explodedY][explodedX])
+        if (Wall == m_grid.m_grid[explodedY][explodedX])
         {
             return true;
         }
@@ -522,7 +543,7 @@ protected:
                     situation.m_selfBomb = true;
                 }
             }
-            if (CELL_FLOOR != m_grid.m_grid[explodedY][explodedX]) //box
+            if (Floor != m_grid.m_grid[explodedY][explodedX]) //box
             {
                 return true;
             }
@@ -601,16 +622,6 @@ protected:
 
 int main()
 {
-#ifdef __APPLE__
-    debug() << "Mac OS" << std::endl;
-#elif __MINGW32__
-    debug() << "MingW @ Win" << std::endl;
-#elif __linux__
-    debug() << "Linux" << std::endl;
-#elif _WIN32
-    debug() << "Windows" << std::endl;
-#endif
-
     Rules rules;
     in() >> rules;
 
