@@ -73,6 +73,11 @@ struct Position
     }
 };
 
+bool operator==(const Position& lhs, const Position& rhs)
+{
+    return lhs.x == rhs.x && lhs.y == rhs.y;
+}
+
 struct Rules
 {
     Position size;
@@ -537,14 +542,14 @@ protected:
         m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
     }
 
-    bool ExplosionMeetsObstacle(int explodedX, int explodedY, const Entity &bombEntity) //true means we need to break
+    bool ExplosionMeetsObstacle(Position exploded, const Entity &bombEntity) //true means we need to break
     {
-        Position exploded = { explodedX, explodedY };
-        CellSituation &situation = m_gridSituation[explodedY][explodedX];
+        CellSituation &situation = m_gridSituation.Pos(exploded);
 
         //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
 
-        if (Wall == m_grid.m_grid[explodedY][explodedX])
+        const char cell = m_grid.m_grid[exploded.y][exploded.x];
+        if (Wall == cell)
         {
             return true;
         }
@@ -558,7 +563,7 @@ protected:
                     situation.m_selfBomb = true;
                 }
             }
-            if (Floor != m_grid.m_grid[explodedY][explodedX]) //box
+            if (Floor != cell) //box
             {
                 return true;
             }
@@ -566,7 +571,7 @@ protected:
             {
                 for (auto &entity : m_entitiesList.m_entitiesList)
                 {
-                    if (entity.pos.x == explodedX && entity.pos.y == explodedY) //bomb explodes otther entity
+                    if (entity.pos == exploded) //bomb explodes otther entity
                     {
                         if (Item == entity.type)
                         {
@@ -585,23 +590,23 @@ protected:
         return false;
     }
 
-    void CalcExplosionDirection(int dx, int dy, const Entity &bombEntity)
+    void CalcExplosionDirection(Position direction, const Entity &bombEntity)
     {
         //DEBUG debug() << "bomb @ " << bombEntity.x << " " << bombEntity.y << " dx,dy=" << dx << "," << dy;
         for (int r = 1; r < bombEntity.explosionRange; r++)
         {
             //DEBUG debug() << " r";
-            int explodedX = bombEntity.pos.x + dx * r;
-            int explodedY = bombEntity.pos.y + dy * r;
-            if (explodedX < 0 || explodedX >= m_grid.m_size.x || explodedY < 0 || explodedY >= m_grid.m_size.y)
+            Position exploded = { bombEntity.pos.x + direction.x * r, bombEntity.pos.y + direction.y * r };
+            if (exploded.x < 0 || exploded.x >= m_grid.m_size.x || exploded.y < 0 || exploded.y >= m_grid.m_size.y)
             {
                 break;
             }
-            if (ExplosionMeetsObstacle(explodedX, explodedY, bombEntity))
+            if (ExplosionMeetsObstacle(exploded, bombEntity))
             {
                 break;
             }
-            if (0 == dx && 0 == dy)
+            const Position Zero = { 0,0 };
+            if (Zero == direction)
             {
                 break; //check bomb position only once
             }
@@ -611,12 +616,13 @@ protected:
     
     void CalcExplosions()
     {
-        const std::vector<std::vector<int>> directions
+        
+        const std::vector<Position> directions
             = { {0, 0},  // bomb position
-                {-1, 0}, // dy=-1 dx= 0 up
-                {0, -1}, // dy= 0 dx=-1 left
-                {0, 1},  // dy= 0 dx=+1 right
-                {1, 0} };// dy=+1 dx= 0 down
+                {0, -1}, // dx= 0 dy=-1 up
+                {-1, 0}, // dx=-1 dy= 0 left
+                {1, 0},  // dx=+1 dy= 0 right
+                {0, 1} };// dx= 0 dy=+1 down
 
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
@@ -626,9 +632,9 @@ protected:
             {
                 const Entity &bombEntity = m_entitiesList.m_entitiesList[bombsToExplode[b]];
 
-                for (auto direction = directions.begin(); direction != directions.end(); direction++)
+                for (auto direction : directions)
                 {
-                    CalcExplosionDirection((*direction)[0], (*direction)[1], bombEntity);
+                    CalcExplosionDirection(direction, bombEntity);
                 }
             }
         }
