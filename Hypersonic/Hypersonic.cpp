@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <list>
@@ -6,14 +7,18 @@
 #include <chrono>
 
 #ifdef _WIN32
-inline std::istream &in()
+#include <windows.h>
+
+std::ifstream inputFile;
+#define VERBOSE_INPUT
+inline std::istream &input()
 {
-    return std::cin;
+    return inputFile;
 }
 
 inline std::ostream &debug()
 {
-    return std::cerr;
+    return std::cout;
 }
 
 inline std::ostream &command()
@@ -22,7 +27,7 @@ inline std::ostream &command()
 }
 #else
 #define VERBOSE_INPUT
-inline std::istream &in()
+inline std::istream &input()
 {
     return std::cin;
 }
@@ -286,15 +291,16 @@ public:
     {
         os << "----Entities (" << m_entitiesList.size() << ") :-------------------" << std::endl;
         os << "Bombs to explode in rounds:" << std::endl;
-        for (size_t i = 1; i < 8 + 1; i++)
+        for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
-            os << i << " (" << m_bombsByRoundsToExplode[i].size() << ") :";
-            for (auto b = m_bombsByRoundsToExplode[i].begin(); b != m_bombsByRoundsToExplode[i].end(); b++)
+            const EntitiesPositions &bombsToExplode = m_bombsByRoundsToExplode[rounds];
+            os << rounds << " (" << bombsToExplode.size() << ") :";
+            for (auto b : bombsToExplode)
             {
-                const Entity &bombEntity = m_entitiesList[*b];
+                const Entity &bombEntity = m_entitiesList[bombsToExplode[b]];
                 if (bombEntity.pos.x > 12 || bombEntity.pos.y > 10)
                 {
-                    debug() << "----ERROR: *b=" << *b << " " << bombEntity << std::endl;
+                    debug() << "----ERROR: b=" << b << " " << bombEntity << std::endl;
                 }
                 os << " @ " << bombEntity.pos;
             }
@@ -375,12 +381,18 @@ public:
     //unsigned long & operator[](Position pos) { return Pos(pos); }
 
     GridSituationPos(Position size)
-        : zeroRowSituation(size.x)
-        , GridSituation(size.y, zeroRowSituation)
+        : GridSituation(size.y, RowSituation(size.x))
     {
     }
-protected:
-    const RowSituation zeroRowSituation;
+
+    void Reset()
+    {
+        CellSituation defaultSituation;
+        for (auto &row : *this)
+        {
+            std::fill(row.begin(), row.end(), CellSituation());
+        }
+    }
 };
 
 class GridCostEstimator
@@ -391,9 +403,8 @@ public:
         , m_zeroRow(m_grid.m_size.x, 0)
         , m_gridCost(m_grid.m_size.y, m_zeroRow)
         , m_entitiesList(entitiesList)
-        , max(0)
-        , zeroRowSituation(m_grid.m_size.x)
-        , m_gridSituation(m_grid.m_size.y, zeroRowSituation)
+        , maxScore(0)
+        , m_gridSituation(m_grid.m_size)
     {
         size_t bombsLeft = entitiesList.Me().bombsLeft;
         size_t range = entitiesList.Me().explosionRange;
@@ -411,19 +422,7 @@ public:
     
     void Reset()
     {
-        CellSituation defaultSituation;
-        for (GridSituation::iterator row = m_gridSituation.begin(); row != m_gridSituation.end(); row++)
-
-        {
-            //debug() << "clear row: ";
-            for (RowSituation::iterator cell = row->begin(); cell != row->end(); cell++)
-                //for (auto cell : row)
-            {
-                *cell = defaultSituation;
-                //debug() << (cell.m_roundsToExplode > 9 ) ? '.' : cell.m_roundsToExplode;
-            }
-            //debug() << std::endl;
-        }
+        m_gridSituation.Reset();
     }
 
     void Analyze()
@@ -452,9 +451,9 @@ public:
             if (cost >= 0 && boxX != x && !m_grid.IsBox(x, y))
             {
                 cost += 2;
-                if (cost > max)
+                if (cost > maxScore)
                 {
-                    max = cost;
+                    maxScore = cost;
                     maxCell.x = x;
                     maxCell.y = y;
                 }
@@ -467,9 +466,9 @@ public:
             if (cost >= 0 && boxY != y && !m_grid.IsBox(x, y))
             {
                 cost += 2;
-                if (cost > max)
+                if (cost > maxScore)
                 {
-                    max = cost;
+                    maxScore = cost;
                     maxCell.x = x;
                     maxCell.y = y;
                 }
@@ -511,8 +510,7 @@ protected:
     typedef std::vector<int> CellRowCost;
     typedef std::vector<CellRowCost> GridCost;
 
-    RowSituation zeroRowSituation;
-    GridSituation m_gridSituation;
+    GridSituationPos m_gridSituation;
 
     const CellRowCost m_zeroRow;
     GridCost m_gridCost;
@@ -520,7 +518,7 @@ protected:
     //std::vector<Entity> m_entitiesList;
 
 
-    int max;
+    int maxScore;
 
     template <typename T>
     void EraseFromVector(std::vector<T> &vec, const T &value)
@@ -566,7 +564,7 @@ protected:
             }
             else
             {
-                for (auto entity : m_entitiesList.m_entitiesList)
+                for (auto &entity : m_entitiesList.m_entitiesList)
                 {
                     if (entity.pos.x == explodedX && entity.pos.y == explodedY) //bomb explodes otther entity
                     {
@@ -622,11 +620,11 @@ protected:
 
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
+            Entities::EntitiesPositions &bombsToExplode = m_entitiesList.m_bombsByRoundsToExplode[rounds];
             //bombs to explode in N rounds (we don't count 0 - they already exloded)
-            for (auto b = m_entitiesList.m_bombsByRoundsToExplode[rounds].begin();
-                b != m_entitiesList.m_bombsByRoundsToExplode[rounds].end(); b++) //it is expected that the list may be extended in the middle
+            for (size_t b = 0; b < bombsToExplode.size(); b++) //not using iterators here as want to add elements to the end of vector in the middle
             {
-                const Entity &bombEntity = m_entitiesList.m_entitiesList[*b];
+                const Entity &bombEntity = m_entitiesList.m_entitiesList[bombsToExplode[b]];
 
                 for (auto direction = directions.begin(); direction != directions.end(); direction++)
                 {
@@ -639,24 +637,37 @@ protected:
 
 int main()
 {
-    debug() << "============start============" << std::endl;
-    
+#ifdef _WIN32
+    char NPath[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, NPath);
+    debug() << NPath << std::endl;
+    inputFile.open("input.txt");
+    if (!inputFile.is_open())
+    {
+        return -1;
+    }
+#endif //#ifdef _WIN32
+
     Rules rules;
-    in() >> rules;
+    input() >> rules;
 
 
     // game loop
     while (1) {
-        std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
+#ifdef _WIN32
+        if (inputFile.eof())
+        {
+            break;
+        }
+#endif //#ifdef _WIN32
 
-        debug() << "============loop============" << std::endl;
+        std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
         Grid grid(rules.size);
-        in() >> grid;
+        input() >> grid;
 
         static Entities entitiesList(rules.myId);
         entitiesList.Reset();
-        in() >> entitiesList;
-        debug() << "======= have input =========" << std::endl;
+        input() >> entitiesList;
 
 
         std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
