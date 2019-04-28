@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <chrono>
 
+#define EXIT_ON_ERRORS
+
 #ifdef _WIN32
 #include <windows.h>
 
@@ -174,6 +176,7 @@ public:
 
     std::istream & Read(std::istream & in)
     {
+        m_grid.clear();
         for (int i = 0; i < m_size.y; i++) {
             std::string row;
             in >> row; in.ignore();
@@ -188,6 +191,14 @@ public:
         };
         debug() << std::endl;
         return in;
+    }
+
+    std::ostream& Print(std::ostream& os) const
+    {
+        for (auto row: m_grid) {
+            os << row << std::endl;
+        }
+        return os;
     }
 
     char Pos(Position pos) const { return m_grid[pos.y][pos.x]; }
@@ -213,6 +224,10 @@ public:
             || IsBoxSafeCheck(pos + directions[3]) || IsBoxSafeCheck(pos + directions[4]);
     }
 
+    bool Equals(const Grid &rhs) const
+    {
+        return m_grid == rhs.m_grid;
+    }
 protected:
     Position m_size;
     std::vector<std::string> m_grid;
@@ -291,6 +306,15 @@ struct Entity
         return in;
     }
 
+    bool Equals(const Entity &rhs) const
+    {
+        return entityType == rhs.entityType
+            && owner == rhs.owner
+            && pos == rhs.pos
+            && param1 == rhs.param1
+            && param2 == rhs.param2;
+    }
+
     int entityOrder;
 };
 
@@ -364,6 +388,7 @@ public:
 
     std::istream & Read(std::istream & in)
     {
+        Reset();
         int entities;
         in >> entities; in.ignore();
 #ifdef VERBOSE_INPUT
@@ -388,6 +413,32 @@ public:
         m_entitiesList.clear();
     }
 
+    bool CoincidesPrediction(const Entities &prediction)
+    {
+        auto entityActual = m_entitiesList.begin();
+        auto entityPredicted = prediction.m_entitiesList.begin();
+        do
+        {
+            if (Player == entityActual->entityType)
+            {
+                if (m_myId == entityActual->owner)
+                {
+                    if (!entityActual->Equals(*entityPredicted))
+                    {
+                        debug() << "***ERROR*** Incorrect prediction own player:" << std::endl;
+                        debug() << *entityPredicted << std::endl << "-------------" << std::endl;
+                        debug() << "Actual (game input):" << std::endl;
+                        debug() << *entityActual << std::endl;
+#ifdef EXIT_ON_ERRORS
+                        throw std::exception();
+#endif //#ifdef EXIT_ON_ERRORS
+                        return false;
+                    }
+                }
+            }
+        } while (entityActual != m_entitiesList.end() && entityPredicted != prediction.m_entitiesList.end());
+    }
+
     //protected:
     int m_myId;
     int m_myEntity;
@@ -400,12 +451,36 @@ public:
 class GameState
 {
 public:
-    GameState(const Grid &grid, Entities &entitiesList)
-        : m_grid(grid)
-        , m_entitiesList(entitiesList)
+    GameState(const Rules &rules)
+        : m_grid(rules.size)
+        , m_entitiesList(rules.myId)
     {}
-    const Grid &m_grid;
-    Entities &m_entitiesList; //will modify (less rounds to explode bombs)
+    std::istream & Read(std::istream & in)
+    {
+        in >> m_grid;
+        in >> m_entitiesList;
+        return in;
+    }
+
+    bool CoincidesPrediction(const GameState &prediction)
+    {
+        if ( ! m_grid.Equals(prediction.m_grid) )
+        {
+            debug() << "***ERROR*** Incorrect prediction of grid:" << std::endl;
+            debug() << prediction.m_grid << std::endl << "-------------" << std::endl;
+            debug() << "Actual (game input):" << std::endl;
+            debug() << m_grid << std::endl;
+#ifdef EXIT_ON_ERRORS
+            throw std::exception();
+#endif //#ifdef EXIT_ON_ERRORS
+            return false;
+        }
+
+        return true;
+    }
+
+    Grid m_grid;
+    Entities m_entitiesList; //will modify (less rounds to explode bombs)
 };
 
 class CellSituation
@@ -471,6 +546,7 @@ public:
 
         , maxScore(0)
         , m_gridSituation(m_state.m_grid.size())
+        , m_prediction(nullptr)
     {
         //size_t bombsLeft = entitiesList.Me().bombsLeft;
         //size_t range = entitiesList.Me().explosionRange;
@@ -485,10 +561,26 @@ public:
         //    }
         //}
     }
+    virtual ~GridCostEstimator()
+    {
+        delete m_prediction;
+    }
     
-    void Reset()
+    void NextTurn()
     {
         m_gridSituation.Reset();
+        if (nullptr == m_prediction)
+        {
+            m_prediction = new GameState(m_state);
+        };
+
+    }
+
+    bool CheckPrediction()
+    {
+        if (nullptr == m_prediction)
+            return true;
+        return m_state.CoincidesPrediction(*m_prediction);
     }
 
     void Analyze()
@@ -576,6 +668,7 @@ protected:
     const CellRowCost m_zeroRow;
     GridCost m_gridCost;
     int maxScore;
+    GameState *m_prediction;
 
     template <typename T>
     void EraseFromVector(std::vector<T> &vec, const T &value)
@@ -617,6 +710,11 @@ protected:
             }
             if (Floor != cell) //box
             {
+                if (1 == situation.m_roundsToExplode && nullptr != m_prediction)
+                {
+                    m_prediction->m_grid.Pos(exploded) = Floor; //next turn prediction: box explodes
+                    //TODO: predict items
+                }
                 return true;
             }
             else
@@ -698,9 +796,9 @@ int main()
 
     Rules rules;
     input() >> rules;
-    Grid grid(rules.size);
-    Entities entitiesList(rules.myId);
-    GameState state(grid, entitiesList);
+    GameState state(rules);
+    GridCostEstimator gridCost(state);
+    GameState prediction(rules);
 
     // game loop
     while (1) {
@@ -712,14 +810,12 @@ int main()
 #endif //#ifdef _WIN32
 
         std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
-        input() >> grid;
-
-        entitiesList.Reset();
-        input() >> entitiesList;
+        input() >> state;
 
         std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
-        static GridCostEstimator gridCost(state);
-        gridCost.Reset();
+        gridCost.CheckPrediction();
+
+        gridCost.NextTurn();
         gridCost.Analyze();
         debug() << gridCost;
 
