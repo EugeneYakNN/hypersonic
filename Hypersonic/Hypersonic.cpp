@@ -193,12 +193,6 @@ public:
     char Pos(Position pos) const { return m_grid[pos.y][pos.x]; }
     char & Pos(Position pos) { return m_grid[pos.y][pos.x]; }
 
-    inline bool IsBox(int x, int y) const //TODO: eliminate code working with individual coordinates
-    {
-        Position pos = { x, y };
-        return IsBox(pos);
-    }
-
     bool IsBox(Position pos) const
     {
         return Floor != Pos(pos) && Wall!= Pos(pos);
@@ -234,11 +228,6 @@ public:
     {}
 protected:
     const Rules &m_rules;
-
-};
-
-class GameState
-{
 
 };
 
@@ -408,6 +397,17 @@ public:
     std::vector<EntitiesPositions> m_bombsByRoundsToExplode;
 };
 
+class GameState
+{
+public:
+    GameState(const Grid &grid, Entities &entitiesList)
+        : m_grid(grid)
+        , m_entitiesList(entitiesList)
+    {}
+    const Grid &m_grid;
+    Entities &m_entitiesList; //will modify (less rounds to explode bombs)
+};
+
 class CellSituation
 {
 public:
@@ -465,16 +465,15 @@ public:
 class GridCostEstimator
 {
 public:
-    GridCostEstimator(const Grid &grid, Entities &entitiesList)
-        : m_grid(grid)
-        , m_zeroRow(m_grid.size().x, 0)
-        , m_gridCost(m_grid.size().y, m_zeroRow)
-        , m_entitiesList(entitiesList)
+    GridCostEstimator(GameState &state)
+        : m_state(state)
+        , m_gridCost(m_state.m_grid.size().y, CellRowCost(m_state.m_grid.size().x, 0))
+
         , maxScore(0)
-        , m_gridSituation(m_grid.size())
+        , m_gridSituation(m_state.m_grid.size())
     {
-        size_t bombsLeft = entitiesList.Me().bombsLeft;
-        size_t range = entitiesList.Me().explosionRange;
+        //size_t bombsLeft = entitiesList.Me().bombsLeft;
+        //size_t range = entitiesList.Me().explosionRange;
 
         //for (int y = 0; y < m_height; y++) {
         //    for (int x = 0; x < m_width; x++) {
@@ -502,42 +501,40 @@ public:
     //    if (Bomb == e.type)
     //}
 
-    void AddBox(size_t boxX, size_t boxY, size_t bombRange)
+    void AddBox(Position box, size_t bombRange)
     {
-        int rangeX[2] = { boxX - bombRange + 1, boxX + bombRange - 1 };
-        clip<int>(rangeX[0], 0, m_grid.size().x);
-        clip<int>(rangeX[1], 0, m_grid.size().x);
+        int rangeX[2] = { box.x - bombRange + 1, box.x + bombRange - 1 };
+        clip<int>(rangeX[0], 0, m_state.m_grid.size().x);
+        clip<int>(rangeX[1], 0, m_state.m_grid.size().x);
 
-        int rangeY[2] = { boxY - bombRange + 1, boxY + bombRange - 1 };
-        clip<int>(rangeY[0], 0, m_grid.size().y);
-        clip<int>(rangeY[1], 0, m_grid.size().y);
+        int rangeY[2] = { box.y - bombRange + 1, box.y + bombRange - 1 };
+        clip<int>(rangeY[0], 0, m_state.m_grid.size().y);
+        clip<int>(rangeY[1], 0, m_state.m_grid.size().y);
 
-        for (int x = rangeX[0]; x < rangeX[1]; x++) {
-            int y = boxY;
-            int &cost = m_gridCost[y][x];
-            if (cost >= 0 && boxX != x && !m_grid.IsBox(x, y))
+        Position pos;
+        for (pos.x = rangeX[0]; pos.x < rangeX[1]; pos.x++) {
+            int &cost = m_gridCost[pos.y][pos.x];
+            if (cost >= 0 && box.x != pos.x && !m_state.m_grid.IsBox(pos))
             {
                 cost += 2;
                 if (cost > maxScore)
                 {
                     maxScore = cost;
-                    maxCell.x = x;
-                    maxCell.y = y;
+                    maxCell = pos;
                 }
             }
         }
 
-        for (int y = rangeY[0]; y < rangeY[1]; y++) {
-            int x = boxX;
-            int &cost = m_gridCost[y][x];
-            if (cost >= 0 && boxY != y && !m_grid.IsBox(x, y))
+        pos.x = box.x;
+        for (pos.y = rangeY[0]; pos.y < rangeY[1]; pos.y++) {
+            int &cost = m_gridCost[pos.y][pos.x];
+            if (cost >= 0 && box.y != pos.y && !m_state.m_grid.IsBox(pos))
             {
                 cost += 2;
                 if (cost > maxScore)
                 {
                     maxScore = cost;
-                    maxCell.x = x;
-                    maxCell.y = y;
+                    maxCell = pos;
                 }
             }
         }
@@ -545,9 +542,9 @@ public:
 
     std::ostream& Print(std::ostream& os) const
     {
-        for (int y = 0; y < m_grid.size().y; y++)
+        for (int y = 0; y < m_state.m_grid.size().y; y++)
         {
-            for (int x = 0; x < m_grid.size().x; x++)
+            for (int x = 0; x < m_state.m_grid.size().x; x++)
             {
                 if (m_gridSituation[y][x].m_roundsToExplode > 9)
                 {
@@ -561,7 +558,7 @@ public:
 
             os << "|";
 
-            for (int x = 0; x < m_grid.size().x; x++) {
+            for (int x = 0; x < m_state.m_grid.size().x; x++) {
                 os << m_gridCost[y][x] << " ";
             }
             os << std::endl;
@@ -572,19 +569,12 @@ public:
     Position maxCell;
 
 protected:
-    const Grid &m_grid;
-
+    GameState &m_state;
     typedef std::vector<int> CellRowCost;
     typedef std::vector<CellRowCost> GridCost;
-
     GridSituationPos m_gridSituation;
-
     const CellRowCost m_zeroRow;
     GridCost m_gridCost;
-    Entities &m_entitiesList; //will modify (less rounds to explode bombs)
-    //std::vector<Entity> m_entitiesList;
-
-
     int maxScore;
 
     template <typename T>
@@ -598,10 +588,10 @@ protected:
         debug() << "ChainReaction, rounds: " << bomb2.roundsToExplode << "->" << bomb1.roundsToExplode << std::endl;
         if (bomb1.roundsToExplode >= bomb2.roundsToExplode)
             throw std::exception();
-        EraseFromVector<size_t>(m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode], bomb2.entityOrder);
+        EraseFromVector<size_t>(m_state.m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode], bomb2.entityOrder);
         //m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].remove(bomb2.entityOrder);
         bomb2.roundsToExplode = bomb1.roundsToExplode;
-        m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
+        m_state.m_entitiesList.m_bombsByRoundsToExplode[bomb2.roundsToExplode].push_back(bomb2.entityOrder);
     }
 
     bool ExplosionMeetsObstacle(Position exploded, const Entity &bombEntity) //true means we need to break
@@ -610,7 +600,7 @@ protected:
 
         //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
 
-        const char cell = m_grid.Pos(exploded);
+        const char cell = m_state.m_grid.Pos(exploded);
         if (Wall == cell)
         {
             return true;
@@ -620,7 +610,7 @@ protected:
             if (bombEntity.roundsToExplode <= situation.m_roundsToExplode)
             {
                 situation.m_roundsToExplode = bombEntity.roundsToExplode;
-                if (m_entitiesList.m_myId == bombEntity.owner) //my bomb
+                if (m_state.m_entitiesList.m_myId == bombEntity.owner) //my bomb
                 {
                     situation.m_selfBomb = true;
                 }
@@ -631,7 +621,7 @@ protected:
             }
             else
             {
-                for (auto &entity : m_entitiesList.m_entitiesList)
+                for (auto &entity : m_state.m_entitiesList.m_entitiesList)
                 {
                     if (entity.pos == exploded) //bomb explodes other entity
                     {
@@ -658,7 +648,7 @@ protected:
         {
             //DEBUG debug() << " r";
             const Position exploded = bombEntity.pos + direction * r; //{ bombEntity.pos.x + direction.x * r, bombEntity.pos.y + direction.y * r };
-            if (!(exploded >= zero && exploded < m_grid.size())) //if (exploded.x < 0 || exploded.x >= m_grid.size().x || exploded.y < 0 || exploded.y >= m_grid.size().y)
+            if (!(exploded >= zero && exploded < m_state.m_grid.size())) //if (exploded.x < 0 || exploded.x >= m_grid.size().x || exploded.y < 0 || exploded.y >= m_grid.size().y)
             {
                 break;
             }
@@ -678,11 +668,11 @@ protected:
     {
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
-            Entities::EntitiesPositions &bombsToExplode = m_entitiesList.m_bombsByRoundsToExplode[rounds];
+            Entities::EntitiesPositions &bombsToExplode = m_state.m_entitiesList.m_bombsByRoundsToExplode[rounds];
             //bombs to explode in N rounds (we don't count 0 - they already exloded)
             for (size_t b = 0; b < bombsToExplode.size(); b++) //not using iterators here as want to add elements to the end of vector in the middle
             {
-                const Entity &bombEntity = m_entitiesList.m_entitiesList[bombsToExplode[b]];
+                const Entity &bombEntity = m_state.m_entitiesList.m_entitiesList[bombsToExplode[b]];
 
                 for (auto direction : directions)
                 {
@@ -708,7 +698,9 @@ int main()
 
     Rules rules;
     input() >> rules;
-
+    Grid grid(rules.size);
+    Entities entitiesList(rules.myId);
+    GameState state(grid, entitiesList);
 
     // game loop
     while (1) {
@@ -720,16 +712,13 @@ int main()
 #endif //#ifdef _WIN32
 
         std::chrono::high_resolution_clock::time_point timeRoundBegin = std::chrono::high_resolution_clock::now();
-        Grid grid(rules.size);
         input() >> grid;
 
-        static Entities entitiesList(rules.myId);
         entitiesList.Reset();
         input() >> entitiesList;
 
-
         std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
-        static GridCostEstimator gridCost(grid, entitiesList);
+        static GridCostEstimator gridCost(state);
         gridCost.Reset();
         gridCost.Analyze();
         debug() << gridCost;
