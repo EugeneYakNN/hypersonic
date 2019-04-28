@@ -78,6 +78,48 @@ bool operator==(const Position& lhs, const Position& rhs)
     return lhs.x == rhs.x && lhs.y == rhs.y;
 }
 
+bool operator<=(const Position& lhs, const Position& rhs)
+{
+    return lhs.x <= rhs.x && lhs.y <= rhs.y;
+}
+
+bool operator<(const Position& lhs, const Position& rhs)
+{
+    return lhs.x < rhs.x && lhs.y < rhs.y;
+}
+
+bool operator>=(const Position& lhs, const Position& rhs)
+{
+    return lhs.x >= rhs.x && lhs.y >= rhs.y;
+}
+
+bool operator>(const Position& lhs, const Position& rhs)
+{
+    return lhs.x > rhs.x && lhs.y > rhs.y;
+}
+
+Position operator+(const Position& lhs, const Position& rhs)
+{
+    Position result = { lhs.x + rhs.x, lhs.y + rhs.y };
+    return result;
+}
+
+Position operator*(const Position& lhs, const int scalar)
+{
+    Position result = { lhs.x * scalar, lhs.y * scalar };
+    return result;
+}
+
+inline Position operator*(const int scalar, const Position& rhs) { return rhs * scalar; }
+
+const Position zero  = {  0,  0 }; // same position or left top corner
+const Position up    = {  0, -1 }; // dx= 0 dy=-1
+const Position left  = { -1,  0 }; // dx=-1 dy= 0
+const Position right = { +1,  0 }; // dx=+1 dy= 0
+const Position down  = {  0, +1 }; // dx= 0 dy=+1
+
+const std::vector<Position> directions = { zero, up, left, right, down };
+
 struct Rules
 {
     Position size;
@@ -119,6 +161,12 @@ public:
         : m_size(size)
     {
     }
+    //Grid (const Grid &grid) - basically same as copy constructor
+    //{
+    //    m_size = grid.m_size;
+    //    m_grid = grid.m_grid;
+    //}
+    Position size() const { return m_size; }
     void ReadRow(const std::string &row)
     {
         m_grid.push_back(row);
@@ -142,27 +190,38 @@ public:
         return in;
     }
 
-    bool IsBox(int x, int y) const
+    char Pos(Position pos) const { return m_grid[pos.y][pos.x]; }
+    char & Pos(Position pos) { return m_grid[pos.y][pos.x]; }
+
+    inline bool IsBox(int x, int y) const //TODO: eliminate code working with individual coordinates
     {
-        return Floor != m_grid[y][x] && Wall!= m_grid[y][x];
+        Position pos = { x, y };
+        return IsBox(pos);
     }
-    bool IsBoxSafeCheck(int x, int y) const
+
+    bool IsBox(Position pos) const
     {
-        if (x < 0 || x >= m_size.x || y < 0 || y >= m_size.y)
-            return false;
+        return Floor != Pos(pos) && Wall!= Pos(pos);
+    }
+    bool IsBoxSafeCheck(Position pos) const
+    {
+        int x = pos.x;
+        int y = pos.y;
+        if (pos >= zero && pos < m_size )
+            return IsBox(pos);
         else
-            return IsBox(x, y);
+            return false;
     }
 
-    bool IsBoxAround(int x, int y) const
+    bool IsBoxAround(Position pos) const
     {
-        return IsBoxSafeCheck(x - 1, y) || IsBoxSafeCheck(x + 1, y)
-            || IsBoxSafeCheck(x, y - 1) || IsBoxSafeCheck(x, y + 1);
+        return IsBoxSafeCheck(pos + directions[1]) || IsBoxSafeCheck(pos + directions[2])
+            || IsBoxSafeCheck(pos + directions[3]) || IsBoxSafeCheck(pos + directions[4]);
     }
 
-    std::vector<std::string> m_grid;
-    Position m_size;
 protected:
+    Position m_size;
+    std::vector<std::string> m_grid;
 };
 
 
@@ -353,13 +412,16 @@ class CellSituation
 {
 public:
     CellSituation()
-        : m_roundsToExplode(0xFFFF)
+        : analyzed(false)
+        , m_roundsToExplode(0xFFFF)
         , m_waysToExit(0)
         , m_selfBomb(false)
         , m_boxCost(0)
         , m_bombPlacementValue(0)
     {
     }
+
+    bool analyzed;
 
     //threats / explosion:
     size_t m_roundsToExplode;       //when this cell be exploded by any bomb (param1)
@@ -382,8 +444,8 @@ public:
     CellSituation Pos(Position pos) const { return at(pos.y).at(pos.x); }
     CellSituation & Pos(Position pos) { return at(pos.y).at(pos.x); }
 
-    //unsigned long operator[](Position pos) const { return Pos(pos); }
-    //unsigned long & operator[](Position pos) { return Pos(pos); }
+    //CellSituation operator[](Position pos) const { return Pos(pos); }
+    //CellSituation & operator[](Position pos) { return Pos(pos); }
 
     GridSituationPos(Position size)
         : GridSituation(size.y, RowSituation(size.x))
@@ -405,11 +467,11 @@ class GridCostEstimator
 public:
     GridCostEstimator(const Grid &grid, Entities &entitiesList)
         : m_grid(grid)
-        , m_zeroRow(m_grid.m_size.x, 0)
-        , m_gridCost(m_grid.m_size.y, m_zeroRow)
+        , m_zeroRow(m_grid.size().x, 0)
+        , m_gridCost(m_grid.size().y, m_zeroRow)
         , m_entitiesList(entitiesList)
         , maxScore(0)
-        , m_gridSituation(m_grid.m_size)
+        , m_gridSituation(m_grid.size())
     {
         size_t bombsLeft = entitiesList.Me().bombsLeft;
         size_t range = entitiesList.Me().explosionRange;
@@ -443,12 +505,12 @@ public:
     void AddBox(size_t boxX, size_t boxY, size_t bombRange)
     {
         int rangeX[2] = { boxX - bombRange + 1, boxX + bombRange - 1 };
-        clip<int>(rangeX[0], 0, m_grid.m_size.x);
-        clip<int>(rangeX[1], 0, m_grid.m_size.x);
+        clip<int>(rangeX[0], 0, m_grid.size().x);
+        clip<int>(rangeX[1], 0, m_grid.size().x);
 
         int rangeY[2] = { boxY - bombRange + 1, boxY + bombRange - 1 };
-        clip<int>(rangeY[0], 0, m_grid.m_size.y);
-        clip<int>(rangeY[1], 0, m_grid.m_size.y);
+        clip<int>(rangeY[0], 0, m_grid.size().y);
+        clip<int>(rangeY[1], 0, m_grid.size().y);
 
         for (int x = rangeX[0]; x < rangeX[1]; x++) {
             int y = boxY;
@@ -483,9 +545,9 @@ public:
 
     std::ostream& Print(std::ostream& os) const
     {
-        for (int y = 0; y < m_grid.m_size.y; y++)
+        for (int y = 0; y < m_grid.size().y; y++)
         {
-            for (int x = 0; x < m_grid.m_size.x; x++)
+            for (int x = 0; x < m_grid.size().x; x++)
             {
                 if (m_gridSituation[y][x].m_roundsToExplode > 9)
                 {
@@ -499,7 +561,7 @@ public:
 
             os << "|";
 
-            for (int x = 0; x < m_grid.m_size.x; x++) {
+            for (int x = 0; x < m_grid.size().x; x++) {
                 os << m_gridCost[y][x] << " ";
             }
             os << std::endl;
@@ -548,7 +610,7 @@ protected:
 
         //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
 
-        const char cell = m_grid.m_grid[exploded.y][exploded.x];
+        const char cell = m_grid.Pos(exploded);
         if (Wall == cell)
         {
             return true;
@@ -571,7 +633,7 @@ protected:
             {
                 for (auto &entity : m_entitiesList.m_entitiesList)
                 {
-                    if (entity.pos == exploded) //bomb explodes otther entity
+                    if (entity.pos == exploded) //bomb explodes other entity
                     {
                         if (Item == entity.type)
                         {
@@ -584,7 +646,6 @@ protected:
                         }
                     }
                 }
-                //TODO: check for other items and bombs
             }
         }
         return false;
@@ -596,8 +657,8 @@ protected:
         for (int r = 1; r < bombEntity.explosionRange; r++)
         {
             //DEBUG debug() << " r";
-            Position exploded = { bombEntity.pos.x + direction.x * r, bombEntity.pos.y + direction.y * r };
-            if (exploded.x < 0 || exploded.x >= m_grid.m_size.x || exploded.y < 0 || exploded.y >= m_grid.m_size.y)
+            const Position exploded = bombEntity.pos + direction * r; //{ bombEntity.pos.x + direction.x * r, bombEntity.pos.y + direction.y * r };
+            if (!(exploded >= zero && exploded < m_grid.size())) //if (exploded.x < 0 || exploded.x >= m_grid.size().x || exploded.y < 0 || exploded.y >= m_grid.size().y)
             {
                 break;
             }
@@ -605,8 +666,7 @@ protected:
             {
                 break;
             }
-            const Position Zero = { 0,0 };
-            if (Zero == direction)
+            if (zero == direction)
             {
                 break; //check bomb position only once
             }
@@ -616,14 +676,6 @@ protected:
     
     void CalcExplosions()
     {
-        
-        const std::vector<Position> directions
-            = { {0, 0},  // bomb position
-                {0, -1}, // dx= 0 dy=-1 up
-                {-1, 0}, // dx=-1 dy= 0 left
-                {1, 0},  // dx=+1 dy= 0 right
-                {0, 1} };// dx= 0 dy=+1 down
-
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
             Entities::EntitiesPositions &bombsToExplode = m_entitiesList.m_bombsByRoundsToExplode[rounds];
