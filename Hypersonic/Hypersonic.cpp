@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 
+#define VALIDATE_INPUT
 #define EXIT_ON_ERRORS
 
 #ifdef _WIN32
@@ -135,6 +136,14 @@ struct Rules
 #endif //#ifdef VERBOSE_INPUT
     }
 };
+
+template <typename T>
+bool checkRange(T &value, T min, T max)
+{
+    return (value >= min && value <= max);
+}
+
+#define CHECK_RANGE_THROW(VAL, MIN, MAX) if ((VAL) < (MIN) || (VAL) > (MAX)) { debug() << #VAL << " = " << (VAL) <<" is out of range: (" << (MIN) << "," << (MAX) << ")" << std::endl; throw std::exception(); }
 
 template <typename T>
 void clip(T &value, T min, T max)
@@ -326,8 +335,38 @@ public:
         , m_myEntity(-1)
         , m_bombsByRoundsToExplode(8 + 1)
     {}
+
     void AddEntity(Entity &e)
     {
+
+#ifdef VALIDATE_INPUT
+        try
+        {
+            CHECK_RANGE_THROW(e.type, Player, Item);
+            CHECK_RANGE_THROW(e.owner, 0, 3);
+            switch (e.type)
+            {
+            case Player:
+                CHECK_RANGE_THROW(e.bombsLeft, 0, 99);
+                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
+                break;
+            case Bomb:
+                CHECK_RANGE_THROW(e.roundsToExplode, 1, 8);
+                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
+                break;
+            case Item:
+                CHECK_RANGE_THROW(e.itemType, 1, 2);
+                //CHECK_RANGE_THROW(e.param2, 0, 0); bug in documentation: The param2 will be: For items : ignored number(= 0). In practice game provides param2 = 2: e.g. 2 0 12 8 2 2
+                break;
+            };
+            CHECK_RANGE_THROW(e.owner, 0, 9);
+        }
+        catch (...)
+        {
+            debug() << "Invalid entity read" << std::endl;
+            throw;
+        }
+#endif //#ifdef VALIDATE_INPUT
         e.entityOrder = m_entitiesList.size();
         if (Player == e.type && m_myId == e.owner)
         {
@@ -413,30 +452,82 @@ public:
         m_entitiesList.clear();
     }
 
+    bool CannotPredictEntity(const Entity &entityActual) //entity is not in prediction, is it ok?
+    {
+        if (Bomb == entityActual.entityType)
+        {
+            if (m_myId != entityActual.owner) //we can't predict when other players place bombs - ignore
+            {
+                return true;
+            }
+            else
+            {
+                debug() << "***ERROR*** No prediction for own bomb:" << std::endl;
+                debug() << entityActual << std::endl;
+#ifdef EXIT_ON_ERRORS
+                throw std::exception();
+#endif //#ifdef EXIT_ON_ERRORS
+                return false;
+            }
+        }
+        else if (Item == entityActual.entityType)
+        {
+            //TODO: predict Items
+            return true; //temporal limitation
+        }
+        else
+        {
+            debug() << "***ERROR*** No prediction for entity:" << std::endl;
+            debug() << entityActual << std::endl;
+#ifdef EXIT_ON_ERRORS
+            throw std::exception();
+#endif //#ifdef EXIT_ON_ERRORS
+            return false;
+        }
+    }
+    
     bool CoincidesPrediction(const Entities &prediction)
     {
-        auto entityActual = m_entitiesList.begin();
-        auto entityPredicted = prediction.m_entitiesList.begin();
+        std::vector<Entity>::const_iterator entityActual = m_entitiesList.begin();
+        std::vector<Entity>::const_iterator entityPredicted = prediction.m_entitiesList.begin();
         do
         {
-            if (Player == entityActual->entityType)
+            while (entityPredicted->entityType > entityActual->entityType) //we predicted less items
             {
-                if (m_myId == entityActual->owner)
+                if (CannotPredictEntity(*entityActual))
                 {
-                    if (!entityActual->Equals(*entityPredicted))
+                    return false;
+                }
+                else
+                {
+                    if (++entityActual == m_entitiesList.end())
                     {
-                        debug() << "***ERROR*** Incorrect prediction own player:" << std::endl;
-                        debug() << *entityPredicted << std::endl << "-------------" << std::endl;
-                        debug() << "Actual (game input):" << std::endl;
-                        debug() << *entityActual << std::endl;
-#ifdef EXIT_ON_ERRORS
-                        throw std::exception();
-#endif //#ifdef EXIT_ON_ERRORS
-                        return false;
+                        break;
                     }
                 }
             }
+//            if (Player == entityActual->entityType)
+//            {
+//                if (m_myId == entityActual->owner)
+//                {
+//                    if (!entityActual->Equals(*entityPredicted))
+//                    {
+//                        debug() << "***ERROR*** Incorrect prediction own player:" << *entityPredicted << std::endl;
+//                        debug() << "Actual (game input):" << *entityActual << std::endl;
+//#ifdef EXIT_ON_ERRORS
+//                        throw std::exception();
+//#endif //#ifdef EXIT_ON_ERRORS
+//                        return false;
+//                    }
+//                }
+//            }
+//            else if (Bomb == entityActual->entityType)
+//            {
+//            }
+            entityActual++;
+            entityPredicted++;
         } while (entityActual != m_entitiesList.end() && entityPredicted != prediction.m_entitiesList.end());
+        return true;
     }
 
     //protected:
@@ -475,8 +566,8 @@ public:
 #endif //#ifdef EXIT_ON_ERRORS
             return false;
         }
-
-        return true;
+        
+        return m_entitiesList.CoincidesPrediction(prediction.m_entitiesList);
     }
 
     Grid m_grid;
