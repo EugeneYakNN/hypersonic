@@ -120,6 +120,7 @@ const Position up    = {  0, -1 }; // dx= 0 dy=-1
 const Position left  = { -1,  0 }; // dx=-1 dy= 0
 const Position right = { +1,  0 }; // dx=+1 dy= 0
 const Position down  = {  0, +1 }; // dx= 0 dy=+1
+const Position rightBottomCell = { 12,  10 }; // TODO: get rid of this const
 
 const std::vector<Position> directions = { zero, up, left, right, down };
 
@@ -213,6 +214,8 @@ public:
     char Pos(Position pos) const { return m_grid[pos.y][pos.x]; }
     char & Pos(Position pos) { return m_grid[pos.y][pos.x]; }
 
+    bool ValidPos(Position pos) const { return (pos >= zero && pos < m_size); }
+
     bool IsBox(Position pos) const
     {
         return Floor != Pos(pos) && Wall!= Pos(pos);
@@ -221,7 +224,7 @@ public:
     {
         int x = pos.x;
         int y = pos.y;
-        if (pos >= zero && pos < m_size )
+        if (ValidPos(pos))
             return IsBox(pos);
         else
             return false;
@@ -344,6 +347,7 @@ public:
         {
             CHECK_RANGE_THROW(e.type, Player, Item);
             CHECK_RANGE_THROW(e.owner, 0, 3);
+            CHECK_RANGE_THROW(e.pos, zero, rightBottomCell);
             switch (e.type)
             {
             case Player:
@@ -582,12 +586,14 @@ public:
         , m_roundsToExplode(0xFFFF)
         , m_waysToExit(0)
         , m_selfBomb(false)
-        , m_boxCost(0)
+        //, m_boxCost(0)
         , m_bombPlacementValue(0)
     {
     }
 
     bool analyzed;
+
+    Entities::EntitiesPositions m_entities;
 
     //threats / explosion:
     size_t m_roundsToExplode;       //when this cell be exploded by any bomb (param1)
@@ -595,7 +601,7 @@ public:
 
     //explosion:
     bool   m_selfBomb;              //player's bomb is one of the earliest, so the player will score
-    size_t m_boxCost;               //does this cell contain a box? With any item?
+    //NO NEED - CAN CALC size_t m_boxCost;               //does this cell contain a box? With any item?
 
     //bomb placement
     size_t m_bombPlacementValue;    //aggregated score, including explosion of unique boxes, another bombs
@@ -657,7 +663,7 @@ public:
         delete m_prediction;
     }
     
-    void NextTurn()
+    void NextRound()
     {
         m_gridSituation.Reset();
         if (nullptr == m_prediction)
@@ -674,9 +680,56 @@ public:
         return m_state.CoincidesPrediction(*m_prediction);
     }
 
+    void EntitiesToGrid()
+    {
+        for (auto entity : m_state.m_entitiesList.m_entitiesList)
+        {
+            CellSituation &cellSituation = m_gridSituation.Pos(entity.pos);
+            cellSituation.m_entities.push_back(entity.entityOrder);
+        }
+    }
+
     void Analyze()
     {
+        EntitiesToGrid();
         CalcExplosions();
+        Position pos = { 0, 0 };
+        //TODO: lazy analysis - start with cells surrounding player
+        for (pos.y = 0; pos.y < m_state.m_grid.size().y; ++pos.y)
+        {
+            for (pos.x = 0; pos.x < m_state.m_grid.size().x; ++pos.x)
+            {
+                CellSituation &cellSituation = m_gridSituation.Pos(pos);
+                char cell = m_state.m_grid.Pos(pos);
+                if (Floor == cell)
+                {
+                    for (size_t d = 1; d <= 4; d++) // check neighbors
+                    {
+                        Position check = pos + directions[d];
+                        if (m_state.m_grid.ValidPos(check))
+                        {
+                            char checkCell = m_state.m_grid.Pos(check);
+                            CellSituation checkSituation = m_gridSituation.Pos(check);
+                            if (Floor == checkCell)
+                            {
+                                cellSituation.m_waysToExit++;
+                            }
+                            if ('0' <= checkCell && checkCell <= '2')
+                            {
+                                //TODO: check if I can trigger chain reaction to explode the box earlier / same time as opponents 
+                                if (0xFFFF == checkSituation.m_roundsToExplode) //for now only count boxes not in range of bombs
+                                {
+                                    size_t bombPlacementValue = checkCell - '0';
+                                    cellSituation.m_bombPlacementValue += (bombPlacementValue);
+                                }
+                            }
+                            //TODO: check entities
+                        }
+                    }
+                }
+                cellSituation.analyzed = true;
+            }
+        }
     }
 
     //void AddEntity(Entity &e)
@@ -725,25 +778,53 @@ public:
 
     std::ostream& Print(std::ostream& os) const
     {
-        for (int y = 0; y < m_state.m_grid.size().y; y++)
+        os << "explodes in  |place bomb?  |ways to exit " << std::endl;
+        Position pos = { 0,0 };
+        for (pos.y = 0; pos.y < m_state.m_grid.size().y; pos.y++)
         {
-            for (int x = 0; x < m_state.m_grid.size().x; x++)
+            for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
             {
-                if (m_gridSituation[y][x].m_roundsToExplode > 9)
+                if (m_gridSituation.Pos(pos).m_roundsToExplode > 9)
                 {
-                    os << ". ";
+                    os << ".";
                 }
                 else
                 {
-                    os << m_gridSituation[y][x].m_roundsToExplode << " ";
+                    os << m_gridSituation.Pos(pos).m_roundsToExplode;
                 }
             }
 
             os << "|";
 
-            for (int x = 0; x < m_state.m_grid.size().x; x++) {
-                os << m_gridCost[y][x] << " ";
+            for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
+            {
+                switch (m_state.m_grid.Pos(pos))
+                {
+                case Wall:  os << "X"; break;
+                case '0':
+                case '1':
+                case '2':   os << "#"; break;
+                default: os << m_gridSituation.Pos(pos).m_bombPlacementValue;
+                }
             }
+
+            os << "|";
+
+            for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
+            {
+                switch (m_state.m_grid.Pos(pos))
+                {
+                case Wall:  os << "X"; break;
+                case '0':
+                case '1':
+                case '2':   os << "#"; break;
+                default: os << m_gridSituation.Pos(pos).m_waysToExit;
+                }
+            }
+
+            //for (int x = 0; x < m_state.m_grid.size().x; x++) {
+            //    os << m_gridCost[y][x] << " ";
+            //}
             os << std::endl;
         }
         return os;
@@ -810,6 +891,7 @@ protected:
             }
             else
             {
+                //TODO: use precalculated CellSituation::m_entities
                 for (auto &entity : m_state.m_entitiesList.m_entitiesList)
                 {
                     if (entity.pos == exploded) //bomb explodes other entity
@@ -906,8 +988,10 @@ int main()
         std::chrono::high_resolution_clock::time_point timeHaveInput = std::chrono::high_resolution_clock::now();
         gridCost.CheckPrediction();
 
-        gridCost.NextTurn();
+        gridCost.NextRound();
         gridCost.Analyze();
+
+
         debug() << gridCost;
 
         // Write an action using cout. DON'T FORGET THE "<< std::endl"
