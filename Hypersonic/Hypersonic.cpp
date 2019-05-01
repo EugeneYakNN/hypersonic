@@ -6,12 +6,14 @@
 #include <list>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 
 #define VALIDATE_INPUT
 #define EXIT_ON_ERRORS
 
 #ifdef _WIN32
 #include <windows.h>
+#undef max
 
 std::ifstream inputFile;
 #define VERBOSE_INPUT
@@ -133,7 +135,7 @@ struct Rules
 
     auto Read(std::istream & in)
     {
-        in >> size.x >> size.y >> myId; in.ignore();
+        in >> size.x >> size.y >> myId; in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 #ifdef VERBOSE_INPUT
         debug() << size.x << " " << size.y << " " << myId <<std::endl;
 #endif //#ifdef VERBOSE_INPUT
@@ -184,6 +186,9 @@ public:
     void ReadRow(const std::string &row)
     {
         m_grid.push_back(row);
+#ifdef VALIDATE_INPUT
+        CHECK_RANGE_THROW(row.length(), m_size.x, m_size.x);
+#endif //#ifdef VALIDATE_INPUT
     }
 
     std::istream & Read(std::istream & in)
