@@ -689,9 +689,6 @@ class GridCostEstimator
 public:
     GridCostEstimator(GameState &state)
         : m_state(state)
-        , m_gridCost(m_state.m_grid.size().y, CellRowCost(m_state.m_grid.size().x, 0))
-
-        , maxScore(0)
         , maxCell(zero)
         , m_gridSituation(m_state.m_grid.size())
         , m_prediction(nullptr)
@@ -1012,50 +1009,6 @@ public:
         return cmd;
     }
 
-    //void AddEntity(Entity &e)
-    //{
-    //    if (Bomb == e.type)
-    //}
-
-    void AddBox(Position box, size_t bombRange)
-    {
-        int rangeX[2] = { box.x - bombRange + 1, box.x + bombRange - 1 };
-        clip<int>(rangeX[0], 0, m_state.m_grid.size().x);
-        clip<int>(rangeX[1], 0, m_state.m_grid.size().x);
-
-        int rangeY[2] = { box.y - bombRange + 1, box.y + bombRange - 1 };
-        clip<int>(rangeY[0], 0, m_state.m_grid.size().y);
-        clip<int>(rangeY[1], 0, m_state.m_grid.size().y);
-
-        Position pos;
-        for (pos.x = rangeX[0]; pos.x < rangeX[1]; pos.x++) {
-            int &cost = m_gridCost[pos.y][pos.x];
-            if (cost >= 0 && box.x != pos.x && !m_state.m_grid.IsBox(pos))
-            {
-                cost += 2;
-                if (cost > maxScore)
-                {
-                    maxScore = cost;
-                    maxCell = pos;
-                }
-            }
-        }
-
-        pos.x = box.x;
-        for (pos.y = rangeY[0]; pos.y < rangeY[1]; pos.y++) {
-            int &cost = m_gridCost[pos.y][pos.x];
-            if (cost >= 0 && box.y != pos.y && !m_state.m_grid.IsBox(pos))
-            {
-                cost += 2;
-                if (cost > maxScore)
-                {
-                    maxScore = cost;
-                    maxCell = pos;
-                }
-            }
-        }
-    }
-
     std::ostream& Print(std::ostream& os) const
     {
         os <<  "explodes in  ";
@@ -1135,12 +1088,7 @@ public:
 
 protected:
     GameState &m_state;
-    typedef std::vector<int> CellRowCost;
-    typedef std::vector<CellRowCost> GridCost;
     GridSituationPos m_gridSituation;
-    const CellRowCost m_zeroRow;
-    GridCost m_gridCost;
-    int maxScore;
     GameState *m_prediction;
     Position maxCell;
 
