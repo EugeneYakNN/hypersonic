@@ -754,9 +754,9 @@ public:
         char cell = m_state.m_grid.Pos(pos);
         if (Floor == cell)
         {
+            size_t boxesWithItems = 0;
             for (size_t d = 1; d <= 4; d++) // check neighbors
             {
-                size_t boxContainsItems = 0;
                 Position check = pos + directions[d];
                 if (m_state.m_grid.ValidPos(check))
                 {
@@ -777,18 +777,19 @@ public:
                         {
                             if (checkCell > '0')
                             {
-                                boxContainsItems++;
+                                boxesWithItems++;
                             }
                             cellSituation.m_bombPlacementValue++;
                         }
                     }
                     //TODO: check entities
                 }
-                cellSituation.m_bombPlacementValue *= 2;
-                if (boxContainsItems > 0)
-                {
-                    cellSituation.m_bombPlacementValue++;
-                }
+
+            }
+            cellSituation.m_bombPlacementValue *= 2;
+            if (boxesWithItems > 0)
+            {
+                cellSituation.m_bombPlacementValue++;
             }
         }
         cellSituation.analyzed = true;
