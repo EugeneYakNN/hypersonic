@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -642,9 +643,11 @@ public:
 
     std::ostream& Print(std::ostream& os) const
     {
-        os << m_prevCell.x << " |" << m_prevCell.y << " |"
-            << m_distanceFromMe << " |" << m_safeTimeToStay << " |"
-            << m_roundsToExplode << " |" << m_distanceToSave << std::endl;
+        os << std::setw(2) << m_prevCell.x << "|" << std::setw(2) << m_prevCell.y << "|";
+        if (INF == m_distanceFromMe)  os << " .|"; else os << std::setw(2) << m_distanceFromMe  << "|";
+        if (INF == m_safeTimeToStay)  os << " .|"; else os << std::setw(2) << m_safeTimeToStay  << "|";
+        if (INF == m_roundsToExplode) os << " .|"; else os << std::setw(2) << m_roundsToExplode << "|";
+        if (INF == m_distanceToSave)  os << " .|"; else os << std::setw(2) << m_distanceToSave  << std::endl;
         return os;
     }
 };
@@ -748,6 +751,7 @@ public:
         {
             for (size_t d = 1; d <= 4; d++) // check neighbors
             {
+                size_t boxContainsItems = 0;
                 Position check = pos + directions[d];
                 if (m_state.m_grid.ValidPos(check))
                 {
@@ -766,11 +770,19 @@ public:
                         //TODO: check if I can trigger chain reaction to explode the box earlier / same time as opponents 
                         if (0xFFFF == checkSituation.m_roundsToExplode) //for now only count boxes not in range of bombs
                         {
-                            size_t bombPlacementValue = checkCell - '0';
-                            cellSituation.m_bombPlacementValue += (bombPlacementValue);
+                            if (checkCell > '0')
+                            {
+                                boxContainsItems++;
+                            }
+                            cellSituation.m_bombPlacementValue++;
                         }
                     }
                     //TODO: check entities
+                }
+                cellSituation.m_bombPlacementValue *= 2;
+                if (boxContainsItems > 0)
+                {
+                    cellSituation.m_bombPlacementValue++;
                 }
             }
         }
@@ -803,21 +815,28 @@ public:
         {
             return;
         }
-        
-        CellSituation &playerSituation = m_gridSituation.Pos(player);
-        if (MaxCellSituation().m_safeTimeToStay <= 0 && playerSituation.m_distanceToSave < MaxCellSituation().m_distanceToSave)
+
+        const CellSituation &playerSituation = m_gridSituation.Pos(player);
+        const CellSituation &maxSituation = MaxCellSituation();
+
+        if (playerSituation.m_safeTimeToStay <= 2)
+        {
+            return;
+        }
+
+        if (maxSituation.m_roundsToExplode < INF && maxSituation.m_safeTimeToStay <= 0 && playerSituation.m_distanceToSave < maxSituation.m_distanceToSave)
         {
             maxCell = player;
             return;
         }
         
-        if (playerSituation.m_itemsValue > MaxCellSituation().m_itemsValue)
+        if (playerSituation.m_itemsValue > maxSituation.m_itemsValue)
         {
             maxCell = player;
             return;
         }
 
-        if (playerSituation.m_bombPlacementValue > MaxCellSituation().m_bombPlacementValue)
+        if (playerSituation.m_bombPlacementValue > maxSituation.m_bombPlacementValue)
         {
             maxCell = player;
             return;
@@ -839,7 +858,7 @@ public:
 
             if (lookAhead < 9) //don't look further than certain depth
             {
-                if (playerSituation.m_roundsToExplode + 1 != lookAhead) //not explodes when step into
+                if (playerSituation.m_roundsToExplode != lookAhead + 1) //not explodes when step into
                 {
                     for (size_t d = 1; d <= 4; d++) // check neighbors
                     {
@@ -891,7 +910,8 @@ public:
     {
         const Entity me = m_state.m_entitiesList.Me();
         const CellSituation &mySituation = m_gridSituation.Pos(me.pos);
-        maxCell = me.pos;
+        std::string message;
+        //maxCell = me.pos;
         //CellSituation &cellSituation = m_gridSituation.Pos(me.pos);
         CalcDistance(0, me.pos, unknown);
 
@@ -909,6 +929,7 @@ public:
         }
 
         CellSituation::PrintLegend(debug());
+        debug() << "x |y |";
         CellSituation::PrintHeader(debug());
 
         if (maxCell == me.pos)
@@ -919,15 +940,24 @@ public:
         else
         {
             Position cellToMove = maxCell;
+            debug() << std::setw(2) << cellToMove.x << "|" << std::setw(2) << cellToMove.y << "|";
             debug() << m_gridSituation.Pos(cellToMove);
             while (!(m_gridSituation.Pos(cellToMove).m_prevCell == me.pos))
             {
                 cellToMove = m_gridSituation.Pos(cellToMove).m_prevCell;
+                if (unknown == cellToMove)
+                {
+                    debug() << "unknown cell, stay still" << std::endl;
+                    cellToMove = me.pos;
+                    message = "OOPS!";
+                    break;
+                }
+                debug() << std::setw(2) << cellToMove.x << "|" << std::setw(2) << cellToMove.y << "|";
                 debug() << m_gridSituation.Pos(cellToMove);
             };
 
 
-            cmd << (placeBomb ? "BOMB " : "MOVE ") << cellToMove.x << " " << cellToMove.y << std::endl;
+            cmd << (placeBomb ? "BOMB " : "MOVE ") << cellToMove.x << " " << cellToMove.y << " " << message << std::endl;
             //if ()
             //{
             //     << cellToMove.x << " " << cellToMove.y << std::endl;
