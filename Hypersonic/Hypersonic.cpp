@@ -177,20 +177,8 @@ public:
         : m_size(size)
     {
     }
-    //Grid (const Grid &grid) - basically same as copy constructor
-    //{
-    //    m_size = grid.m_size;
-    //    m_grid = grid.m_grid;
-    //}
-    Position size() const { return m_size; }
-    void ReadRow(const std::string &row)
-    {
-        m_grid.push_back(row);
-#ifdef VALIDATE_INPUT
-        CHECK_RANGE_THROW(row.length(), m_size.x, m_size.x);
-#endif //#ifdef VALIDATE_INPUT
-    }
 
+    Position size() const { return m_size; }
     std::istream & Read(std::istream & in)
     {
         m_grid.clear();
@@ -223,36 +211,22 @@ public:
 
     bool ValidPos(Position pos) const { return (pos >= zero && pos < m_size); }
 
-    bool IsBox(Position pos) const
-    {
-        return Floor != Pos(pos) && Wall!= Pos(pos);
-    }
-    bool IsBoxSafeCheck(Position pos) const
-    {
-        int x = pos.x;
-        int y = pos.y;
-        if (ValidPos(pos))
-            return IsBox(pos);
-        else
-            return false;
-    }
-
-    bool IsBoxAround(Position pos) const
-    {
-        return IsBoxSafeCheck(pos + directions[1]) || IsBoxSafeCheck(pos + directions[2])
-            || IsBoxSafeCheck(pos + directions[3]) || IsBoxSafeCheck(pos + directions[4]);
-    }
-
     bool Equals(const Grid &rhs) const
     {
         return m_grid == rhs.m_grid;
     }
 protected:
+    void ReadRow(const std::string &row)
+    {
+        m_grid.push_back(row);
+#ifdef VALIDATE_INPUT
+        CHECK_RANGE_THROW(row.length(), m_size.x, m_size.x);
+#endif //#ifdef VALIDATE_INPUT
+    }
+
     Position m_size;
     std::vector<std::string> m_grid;
 };
-
-
 
 class Map
 {
@@ -346,77 +320,13 @@ public:
         , m_bombsByRoundsToExplode(8 + 1)
     {}
 
-    void AddEntity(Entity &e)
-    {
-
-#ifdef VALIDATE_INPUT
-        try
-        {
-            CHECK_RANGE_THROW(e.type, Player, Item);
-            CHECK_RANGE_THROW(e.owner, 0, 3);
-            CHECK_RANGE_THROW(e.pos, zero, rightBottomCell);
-            switch (e.type)
-            {
-            case Player:
-                CHECK_RANGE_THROW(e.bombsLeft, 0, 99);
-                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
-                break;
-            case Bomb:
-                CHECK_RANGE_THROW(e.roundsToExplode, 1, 8);
-                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
-                break;
-            case Item:
-                CHECK_RANGE_THROW(e.itemType, 1, 2);
-                //CHECK_RANGE_THROW(e.param2, 0, 0); bug in documentation: The param2 will be: For items : ignored number(= 0). In practice game provides param2 = 2: e.g. 2 0 12 8 2 2
-                break;
-            };
-            CHECK_RANGE_THROW(e.owner, 0, 9);
-        }
-        catch (...)
-        {
-            debug() << "Invalid entity read" << std::endl;
-            throw;
-        }
-#endif //#ifdef VALIDATE_INPUT
-        e.entityOrder = m_entitiesList.size();
-        if (Player == e.type && m_myId == e.owner)
-        {
-            m_myEntity = e.entityOrder;
-        }
-        m_entitiesList.push_back(e);
-
-        if (Bomb == e.type)
-        {
-            //bool myBomb = (m_myId == e.owner);
-            try
-            {
-                //sorry, cannot guarantee order of the bombs in the list (we move bombs in the middle of checking them).=
-                //if (myBomb)
-                //{
-                //    m_bombsByRoundsToExplode[e.roundsToExplode].push_front(e.entityOrder);
-                //}
-                //else
-                //{
-                    m_bombsByRoundsToExplode[e.roundsToExplode].push_back(e.entityOrder);
-                //}
-            }
-            catch (...)
-            {
-                debug() << "e.roundsToExplode = " << e.roundsToExplode << std::endl;
-                debug() << "m_bombsByRoundsToExplode[e.roundsToExplode].size() = " << m_bombsByRoundsToExplode[e.roundsToExplode].size() << std::endl;
-                throw;
-            }
-
-        }
-    }
-
     const Entity & Me() const
     {
-        return m_entitiesList[m_myEntity];
+        return m_list[m_myEntity];
     }
     std::ostream& Print(std::ostream& os) const
     {
-        os << "----Entities (" << m_entitiesList.size() << ") :-------------------" << std::endl;
+        os << "----Entities (" << m_list.size() << ") :-------------------" << std::endl;
         os << "Bombs to explode in rounds:" << std::endl;
         for (size_t rounds = 1; rounds < 8 + 1; rounds++)
         {
@@ -424,7 +334,7 @@ public:
             os << rounds << " (" << bombsToExplode.size() << ") :";
             for (auto b : bombsToExplode)
             {
-                const Entity &bombEntity = m_entitiesList[bombsToExplode[b]];
+                const Entity &bombEntity = m_list[bombsToExplode[b]];
                 if (bombEntity.pos.x > 12 || bombEntity.pos.y > 10)
                 {
                     debug() << "----ERROR: b=" << b << " " << bombEntity << std::endl;
@@ -460,7 +370,122 @@ public:
         {
             m_bombsByRoundsToExplode[i].clear();
         }
-        m_entitiesList.clear();
+        m_list.clear();
+    }
+
+    bool CoincidesPrediction(const Entities &prediction)
+    {
+        std::vector<Entity>::const_iterator entityActual = m_list.begin();
+        std::vector<Entity>::const_iterator entityPredicted = prediction.m_list.begin();
+        do
+        {
+            while (entityPredicted->entityType > entityActual->entityType) //we predicted less items
+            {
+                if (CannotPredictEntity(*entityActual))
+                {
+                    return false;
+                }
+                else
+                {
+                    if (++entityActual == m_list.end())
+                    {
+                        break;
+                    }
+                }
+            }
+//            if (Player == entityActual->entityType)
+//            {
+//                if (m_myId == entityActual->owner)
+//                {
+//                    if (!entityActual->Equals(*entityPredicted))
+//                    {
+//                        debug() << "***ERROR*** Incorrect prediction own player:" << *entityPredicted << std::endl;
+//                        debug() << "Actual (game input):" << *entityActual << std::endl;
+//#ifdef EXIT_ON_ERRORS
+//                        throw std::exception();
+//#endif //#ifdef EXIT_ON_ERRORS
+//                        return false;
+//                    }
+//                }
+//            }
+//            else if (Bomb == entityActual->entityType)
+//            {
+//            }
+            entityActual++;
+            entityPredicted++;
+        } while (entityActual != m_list.end() && entityPredicted != prediction.m_list.end());
+        return true;
+    }
+
+    typedef std::vector<size_t> EntitiesPositions;
+    std::vector<Entity> m_list;
+    int m_myId;
+    std::vector<EntitiesPositions> m_bombsByRoundsToExplode;
+protected:
+    int m_myEntity;
+
+    void AddEntity(Entity &e)
+    {
+
+#ifdef VALIDATE_INPUT
+        try
+        {
+            CHECK_RANGE_THROW(e.type, Player, Item);
+            CHECK_RANGE_THROW(e.owner, 0, 3);
+            CHECK_RANGE_THROW(e.pos, zero, rightBottomCell);
+            switch (e.type)
+            {
+            case Player:
+                CHECK_RANGE_THROW(e.bombsLeft, 0, 99);
+                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
+                break;
+            case Bomb:
+                CHECK_RANGE_THROW(e.roundsToExplode, 1, 8);
+                CHECK_RANGE_THROW(e.explosionRange, 3, 99);
+                break;
+            case Item:
+                CHECK_RANGE_THROW(e.itemType, 1, 2);
+                //CHECK_RANGE_THROW(e.param2, 0, 0); bug in documentation: The param2 will be: For items : ignored number(= 0). In practice game provides param2 = 2: e.g. 2 0 12 8 2 2
+                break;
+            };
+            CHECK_RANGE_THROW(e.owner, 0, 9);
+        }
+        catch (...)
+        {
+            debug() << "Invalid entity read" << std::endl;
+            throw;
+        }
+#endif //#ifdef VALIDATE_INPUT
+        e.entityOrder = m_list.size();
+        if (Player == e.type && m_myId == e.owner)
+        {
+            m_myEntity = e.entityOrder;
+        }
+        m_list.push_back(e);
+
+        if (Bomb == e.type)
+        {
+            //bool myBomb = (m_myId == e.owner);
+            try
+            {
+                //sorry, cannot guarantee order of the bombs in the list (we move bombs in the middle of checking them).=
+                //if (myBomb)
+                //{
+                //    m_bombsByRoundsToExplode[e.roundsToExplode].push_front(e.entityOrder);
+                //}
+                //else
+                //{
+                m_bombsByRoundsToExplode[e.roundsToExplode].push_back(e.entityOrder);
+                //}
+            }
+            catch (...)
+            {
+                debug() << "e.roundsToExplode = " << e.roundsToExplode << std::endl;
+                debug() << "m_bombsByRoundsToExplode[e.roundsToExplode].size() = " << m_bombsByRoundsToExplode[e.roundsToExplode].size() << std::endl;
+                throw;
+            }
+
+        }
     }
 
     bool CannotPredictEntity(const Entity &entityActual) //entity is not in prediction, is it ok?
@@ -496,58 +521,6 @@ public:
             return false;
         }
     }
-    
-    bool CoincidesPrediction(const Entities &prediction)
-    {
-        std::vector<Entity>::const_iterator entityActual = m_entitiesList.begin();
-        std::vector<Entity>::const_iterator entityPredicted = prediction.m_entitiesList.begin();
-        do
-        {
-            while (entityPredicted->entityType > entityActual->entityType) //we predicted less items
-            {
-                if (CannotPredictEntity(*entityActual))
-                {
-                    return false;
-                }
-                else
-                {
-                    if (++entityActual == m_entitiesList.end())
-                    {
-                        break;
-                    }
-                }
-            }
-//            if (Player == entityActual->entityType)
-//            {
-//                if (m_myId == entityActual->owner)
-//                {
-//                    if (!entityActual->Equals(*entityPredicted))
-//                    {
-//                        debug() << "***ERROR*** Incorrect prediction own player:" << *entityPredicted << std::endl;
-//                        debug() << "Actual (game input):" << *entityActual << std::endl;
-//#ifdef EXIT_ON_ERRORS
-//                        throw std::exception();
-//#endif //#ifdef EXIT_ON_ERRORS
-//                        return false;
-//                    }
-//                }
-//            }
-//            else if (Bomb == entityActual->entityType)
-//            {
-//            }
-            entityActual++;
-            entityPredicted++;
-        } while (entityActual != m_entitiesList.end() && entityPredicted != prediction.m_entitiesList.end());
-        return true;
-    }
-
-    //protected:
-    int m_myId;
-    int m_myEntity;
-    std::vector<Entity> m_entitiesList;
-
-    typedef std::vector<size_t> EntitiesPositions;
-    std::vector<EntitiesPositions> m_bombsByRoundsToExplode;
 };
 
 class GameState
@@ -731,7 +704,7 @@ public:
 
     void EntitiesToGrid()
     {
-        for (auto entity : m_state.m_entitiesList.m_entitiesList)
+        for (auto entity : m_state.m_entitiesList.m_list)
         {
             CellSituation &cellSituation = m_gridSituation[entity.pos];
             cellSituation.m_entities.push_back(entity.entityOrder);
@@ -831,7 +804,7 @@ public:
         
         if (playerSituation.m_itemsValue != maxSituation.m_itemsValue)
         {
-            if (playerSituation.m_itemsValue > maxSituation.m_itemsValue)
+            if (playerSituation.m_itemsValue > maxSituation.m_itemsValue && playerSituation.m_distanceFromMe <= maxSituation.m_distanceFromMe )
             {
                 maxCell = player;
             }
@@ -912,11 +885,12 @@ public:
     {
         const Entity me = m_state.m_entitiesList.Me();
         const CellSituation &mySituation = m_gridSituation[me.pos];
-        const CellSituation &maxCellSituation = m_gridSituation[maxCell];
         std::string message;
         //maxCell = me.pos;
         //CellSituation &cellSituation = m_gridSituation.Pos(me.pos);
         CalcDistance(0, me.pos, unknown);
+
+        const CellSituation &maxCellSituation = m_gridSituation[maxCell];
 
         //should I place a bomb?
         bool placeBomb = false;
@@ -1014,11 +988,11 @@ public:
         os << "|distance     ";
         os << std::endl;
         Position pos = { 0,0 };
-        const CellSituation &situation = m_gridSituation[pos];
         for (pos.y = 0; pos.y < m_state.m_grid.size().y; pos.y++)
         {
             for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
             {
+                const CellSituation &situation = m_gridSituation[pos];
                 if (situation.m_roundsToExplode > 9)
                 {
                     os << ".";
@@ -1033,6 +1007,7 @@ public:
 
             for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
             {
+                const CellSituation &situation = m_gridSituation[pos];
                 switch (m_state.m_grid.Pos(pos))
                 {
                 case Wall:  os << "X"; break;
@@ -1058,6 +1033,7 @@ public:
             //}
             for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
             {
+                const CellSituation &situation = m_gridSituation[pos];
                 switch (m_state.m_grid.Pos(pos))
                 {
                 case Wall:  os << "X"; break;
@@ -1140,7 +1116,7 @@ protected:
             else
             {
                 //TODO: use precalculated CellSituation::m_entities
-                for (auto &entity : m_state.m_entitiesList.m_entitiesList)
+                for (auto &entity : m_state.m_entitiesList.m_list)
                 {
                     if (entity.pos == exploded) //bomb explodes other entity
                     {
@@ -1200,7 +1176,7 @@ protected:
             //bombs to explode in N rounds (we don't count 0 - they already exloded)
             for (size_t b = 0; b < bombsToExplode.size(); b++) //not using iterators here as want to add elements to the end of vector in the middle
             {
-                const Entity &bombEntity = m_state.m_entitiesList.m_entitiesList[bombsToExplode[b]];
+                const Entity &bombEntity = m_state.m_entitiesList.m_list[bombsToExplode[b]];
 
                 for (auto direction : directions)
                 {
