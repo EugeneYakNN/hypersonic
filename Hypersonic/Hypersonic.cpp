@@ -830,9 +830,12 @@ public:
             return;
         }
         
-        if (playerSituation.m_itemsValue > maxSituation.m_itemsValue)
+        if (playerSituation.m_itemsValue != maxSituation.m_itemsValue)
         {
-            maxCell = player;
+            if (playerSituation.m_itemsValue > maxSituation.m_itemsValue)
+            {
+                maxCell = player;
+            }
             return;
         }
 
