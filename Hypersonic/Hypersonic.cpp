@@ -657,31 +657,32 @@ public:
     }
 };
 
-typedef std::vector<CellSituation> RowSituation;
-typedef std::vector<RowSituation> GridSituation;
-
-class GridSituationPos : public GridSituation //TODO: replace inheritance with aggregation
+class GridSituationPos
 {
 public:
-    const CellSituation &Pos(Position pos) const { return at(pos.y).at(pos.x); }
-    CellSituation & Pos(Position pos) { return at(pos.y).at(pos.x); }
-
-    //CellSituation operator[](Position pos) const { return Pos(pos); }
-    //CellSituation & operator[](Position pos) { return Pos(pos); }
+    inline CellSituation operator[](Position pos) const { return Pos(pos); }
+    inline CellSituation & operator[](Position pos) { return Pos(pos); }
 
     GridSituationPos(Position size)
-        : GridSituation(size.y, RowSituation(size.x))
+        : m_situaton(size.y, RowSituation(size.x))
     {
     }
 
     void Reset()
     {
         CellSituation defaultSituation;
-        for (auto &row : *this)
+        for (auto &row : m_situaton)
         {
             std::fill(row.begin(), row.end(), CellSituation());
         }
     }
+protected:
+    const CellSituation &Pos(Position pos) const { return m_situaton[pos.y][pos.x]; }
+    CellSituation & Pos(Position pos) { return m_situaton[pos.y][pos.x]; }
+
+    typedef std::vector<CellSituation> RowSituation;
+    typedef std::vector<RowSituation> GridSituation;
+    GridSituation m_situaton;
 };
 
 class GridCostEstimator
@@ -732,7 +733,7 @@ public:
     {
         for (auto entity : m_state.m_entitiesList.m_entitiesList)
         {
-            CellSituation &cellSituation = m_gridSituation.Pos(entity.pos);
+            CellSituation &cellSituation = m_gridSituation[entity.pos];
             cellSituation.m_entities.push_back(entity.entityOrder);
             if (Item == entity.entityType)
             {
@@ -747,7 +748,7 @@ public:
 
     void AnalyzeCell(Position pos)
     {
-        CellSituation &cellSituation = m_gridSituation.Pos(pos);
+        CellSituation &cellSituation = m_gridSituation[pos];
         char cell = m_state.m_grid.Pos(pos);
         if (Floor == cell)
         {
@@ -758,7 +759,7 @@ public:
                 if (m_state.m_grid.ValidPos(check))
                 {
                     char checkCell = m_state.m_grid.Pos(check);
-                    CellSituation checkSituation = m_gridSituation.Pos(check);
+                    CellSituation checkSituation = m_gridSituation[check];
                     if (Floor == checkCell)
                     {
                         cellSituation.m_waysToExit++;
@@ -807,11 +808,6 @@ public:
         }
     }
 
-    inline const CellSituation &MaxCellSituation() const
-    {
-        return m_gridSituation.Pos(maxCell);
-    }
-
     void CheckAgainstMax(Position player)
     {
         if (player == maxCell)
@@ -819,8 +815,8 @@ public:
             return;
         }
 
-        const CellSituation &playerSituation = m_gridSituation.Pos(player);
-        const CellSituation &maxSituation = MaxCellSituation();
+        const CellSituation &playerSituation = m_gridSituation[player];
+        const CellSituation &maxSituation = m_gridSituation[maxCell];
 
         if (playerSituation.m_safeTimeToStay <= 2)
         {
@@ -851,7 +847,7 @@ public:
     
     void CalcDistance(size_t lookAhead, Position player, Position prev)
     {
-        CellSituation &playerSituation = m_gridSituation.Pos(player);
+        CellSituation &playerSituation = m_gridSituation[player];
         if (playerSituation.m_distanceFromMe > lookAhead)
         {
             playerSituation.m_distanceFromMe = lookAhead;
@@ -871,11 +867,11 @@ public:
                         Position check = player + directions[d];
                         if (m_state.m_grid.ValidPos(check)
                             && Floor == m_state.m_grid.Pos(check)
-                            && false == m_gridSituation.Pos(check).m_hasBomb) //Players can occupy the same cell as a bomb only when the bomb appears on the same turn as when the player enters the cell.
+                            && false == m_gridSituation[check].m_hasBomb) //Players can occupy the same cell as a bomb only when the bomb appears on the same turn as when the player enters the cell.
                         {
                             CalcDistance(lookAhead + 1, check, player); //recursively check every possible direction
                                                         
-                            CellSituation checkSituation = m_gridSituation.Pos(check);
+                            CellSituation checkSituation = m_gridSituation[check];
                             if (playerSituation.m_distanceToSave > 0
                                 && checkSituation.m_distanceToSave + 1 < playerSituation.m_distanceToSave)
                             {
@@ -915,7 +911,8 @@ public:
     std::ostream& PlayerCommand(std::ostream& cmd)
     {
         const Entity me = m_state.m_entitiesList.Me();
-        const CellSituation &mySituation = m_gridSituation.Pos(me.pos);
+        const CellSituation &mySituation = m_gridSituation[me.pos];
+        const CellSituation &maxCellSituation = m_gridSituation[maxCell];
         std::string message;
         //maxCell = me.pos;
         //CellSituation &cellSituation = m_gridSituation.Pos(me.pos);
@@ -927,7 +924,7 @@ public:
         {
             if (INF == mySituation.m_roundsToExplode) //TODO: not ready to predict chain reaction
             {
-                if (mySituation.m_bombPlacementValue >= MaxCellSituation().m_bombPlacementValue)
+                if (mySituation.m_bombPlacementValue >= maxCellSituation.m_bombPlacementValue)
                 {
                     placeBomb = true;
                 }
@@ -947,10 +944,10 @@ public:
         {
             Position cellToMove = maxCell;
             debug() << std::setw(2) << cellToMove.x << "|" << std::setw(2) << cellToMove.y << "|";
-            debug() << m_gridSituation.Pos(cellToMove);
-            while (!(m_gridSituation.Pos(cellToMove).m_prevCell == me.pos))
+            debug() << m_gridSituation[cellToMove];
+            while (!(m_gridSituation[cellToMove].m_prevCell == me.pos))
             {
-                cellToMove = m_gridSituation.Pos(cellToMove).m_prevCell;
+                cellToMove = m_gridSituation[cellToMove].m_prevCell;
                 if (unknown == cellToMove)
                 {
                     debug() << "unknown cell, stay still" << std::endl;
@@ -959,7 +956,7 @@ public:
                     break;
                 }
                 debug() << std::setw(2) << cellToMove.x << "|" << std::setw(2) << cellToMove.y << "|";
-                debug() << m_gridSituation.Pos(cellToMove);
+                debug() << m_gridSituation[cellToMove];
             };
 
 
@@ -1017,17 +1014,18 @@ public:
         os << "|distance     ";
         os << std::endl;
         Position pos = { 0,0 };
+        const CellSituation &situation = m_gridSituation[pos];
         for (pos.y = 0; pos.y < m_state.m_grid.size().y; pos.y++)
         {
             for (pos.x = 0; pos.x < m_state.m_grid.size().x; pos.x++)
             {
-                if (m_gridSituation.Pos(pos).m_roundsToExplode > 9)
+                if (situation.m_roundsToExplode > 9)
                 {
                     os << ".";
                 }
                 else
                 {
-                    os << m_gridSituation.Pos(pos).m_roundsToExplode;
+                    os << situation.m_roundsToExplode;
                 }
             }
 
@@ -1041,7 +1039,7 @@ public:
                 case '0':
                 case '1':
                 case '2':   os << "#"; break;
-                default: os << m_gridSituation.Pos(pos).m_bombPlacementValue;
+                default: os << situation.m_bombPlacementValue;
                 }
             }
 
@@ -1067,13 +1065,13 @@ public:
                 case '1':
                 case '2':   os << "#"; break;
                 default:
-                    if (m_gridSituation.Pos(pos).m_distanceFromMe > 9)
+                    if (situation.m_distanceFromMe > 9)
                     {
                         os << ".";
                     }
                     else
                     {
-                        os << m_gridSituation.Pos(pos).m_distanceFromMe;
+                        os << situation.m_distanceFromMe;
                     }
                 }
             }
@@ -1111,7 +1109,7 @@ protected:
 
     bool ExplosionMeetsObstacle(Position exploded, const Entity &bombEntity) //true means we need to break
     {
-        CellSituation &situation = m_gridSituation.Pos(exploded);
+        CellSituation &situation = m_gridSituation[exploded];
 
         //DEBUG debug() << "(" << m_grid.m_grid[explodedY][explodedX] << ")";
 
