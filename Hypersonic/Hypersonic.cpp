@@ -610,12 +610,13 @@ public:
         os << "px: prevCell.x     st: safeTimeToStay" << std::endl;
         os << "py: prevCell.y    re: roundsToExplode" << std::endl;
         os << "dm: distanceFromMe ds: distanceToSave" << std::endl;
+        os << "bv: m_bombPlacementValue iv: m_itemsValue" << std::endl;
         return os;
     }
 
     static std::ostream& PrintHeader(std::ostream& os)
     {
-        os << "px|py|dm|st|re|ds" << std::endl;
+        os << "px|py|dm|st|re|ds|bv|iv" << std::endl;
         return os;
     }
 
@@ -625,7 +626,9 @@ public:
         if (INF == m_distanceFromMe)  os << " .|"; else os << std::setw(2) << m_distanceFromMe  << "|";
         if (INF == m_safeTimeToStay)  os << " .|"; else os << std::setw(2) << m_safeTimeToStay  << "|";
         if (INF == m_roundsToExplode) os << " .|"; else os << std::setw(2) << m_roundsToExplode << "|";
-        if (INF == m_distanceToSave)  os << " .|"; else os << std::setw(2) << m_distanceToSave  << std::endl;
+        if (INF == m_distanceToSave)  os << " .|"; else os << std::setw(2) << m_distanceToSave << "|";
+        os << std::setw(2) << m_bombPlacementValue << "|" << std::setw(2) << m_itemsValue;
+        os << std::endl;
         return os;
     }
 };
@@ -802,7 +805,7 @@ public:
             return;
         }
         
-        if (playerSituation.m_itemsValue != maxSituation.m_itemsValue)
+        if (playerSituation.m_itemsValue >= maxSituation.m_itemsValue)
         {
             if (playerSituation.m_itemsValue > maxSituation.m_itemsValue && playerSituation.m_distanceFromMe <= maxSituation.m_distanceFromMe )
             {
@@ -811,7 +814,7 @@ public:
             return;
         }
 
-        if (playerSituation.m_bombPlacementValue > maxSituation.m_bombPlacementValue)
+        if (INF == playerSituation.m_roundsToExplode && playerSituation.m_bombPlacementValue > maxSituation.m_bombPlacementValue)
         {
             maxCell = player;
             return;
@@ -886,7 +889,10 @@ public:
         const Entity me = m_state.m_entitiesList.Me();
         const CellSituation &mySituation = m_gridSituation[me.pos];
         std::string message;
-        //maxCell = me.pos;
+        if (INF == m_gridSituation[maxCell].m_distanceFromMe)
+        {
+            maxCell = me.pos;
+        }
         //CellSituation &cellSituation = m_gridSituation.Pos(me.pos);
         CalcDistance(0, me.pos, unknown);
 
