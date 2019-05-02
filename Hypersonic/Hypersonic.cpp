@@ -729,7 +729,7 @@ public:
         if (Floor == cell)
         {
             size_t boxesWithItems = 0;
-            for (size_t d = 1; d <= 4; d++) // check neighbors
+            for (size_t d = 1; d <= 4; d++) // check neighbors //TODO: check explosionRange cells
             {
                 Position check = pos + directions[d];
                 if (m_state.m_grid.ValidPos(check))
@@ -799,19 +799,31 @@ public:
             return;
         }
 
-        if (maxSituation.m_roundsToExplode < INF && maxSituation.m_safeTimeToStay <= 0 && playerSituation.m_distanceToSave < maxSituation.m_distanceToSave)
+        if (maxSituation.m_roundsToExplode < INF && maxSituation.m_safeTimeToStay <= 0) //run away mode
         {
-            maxCell = player;
-            return;
-        }
-        
-        if (playerSituation.m_itemsValue >= maxSituation.m_itemsValue)
-        {
-            if (playerSituation.m_itemsValue > maxSituation.m_itemsValue && playerSituation.m_distanceFromMe <= maxSituation.m_distanceFromMe )
+            if (playerSituation.m_distanceToSave < maxSituation.m_distanceToSave)
             {
                 maxCell = player;
+                return;
             }
-            return;
+        }
+
+        
+
+
+        if (playerSituation.m_itemsValue > 0)
+        {
+            if (playerSituation.m_itemsValue > maxSituation.m_itemsValue && playerSituation.m_distanceFromMe <= maxSituation.m_distanceFromMe)
+            {
+                maxCell = player;
+                return;
+            }
+
+            if (playerSituation.m_itemsValue >= maxSituation.m_itemsValue && playerSituation.m_distanceFromMe < maxSituation.m_distanceFromMe)
+            {
+                maxCell = player;
+                return;
+            }
         }
 
         if (INF == playerSituation.m_roundsToExplode && playerSituation.m_bombPlacementValue > maxSituation.m_bombPlacementValue)
@@ -828,7 +840,7 @@ public:
         {
             playerSituation.m_distanceFromMe = lookAhead;
             playerSituation.m_prevCell = prev;
-            if (INF == playerSituation.m_roundsToExplode)
+            if (INF == playerSituation.m_roundsToExplode) //TODO: currently it will not work as you may get to cell at different time depending on path || playerSituation.m_roundsToExplode < playerSituation.m_distanceFromMe)
             {
                 playerSituation.m_distanceToSave = 0;
                 playerSituation.m_safeTimeToStay = INF;
@@ -843,7 +855,7 @@ public:
                         Position check = player + directions[d];
                         if (m_state.m_grid.ValidPos(check)
                             && Floor == m_state.m_grid.Pos(check)
-                            && false == m_gridSituation[check].m_hasBomb) //Players can occupy the same cell as a bomb only when the bomb appears on the same turn as when the player enters the cell.
+                            && false == m_gridSituation[check].m_hasBomb) //If a bomb is already occupying that cell, the player won't be able to move there.
                         {
                             CalcDistance(lookAhead + 1, check, player); //recursively check every possible direction
                                                         
@@ -886,6 +898,16 @@ public:
     
     std::ostream& PlayerCommand(std::ostream& cmd)
     {
+        //need to model the whole game state several rounds ahead.
+        //the reason is - static cell situation only works for one turn.
+        //Is a cell X Y good to go?
+        //It may be exploded right when you step into it. But what if you do a longer path and come there later?
+
+        //build decision tree
+        //for every commands of player (stay/move^<>v * bomb?) and opponents - (at least bomb?)
+        //model game states (we don't have that for entities, e.g. items)
+        //score outcome (+boxes hit score, +powerup, +opponent dead, -trap, --death, see also CellSituation for player's location)
+        
         const Entity me = m_state.m_entitiesList.Me();
         const CellSituation &mySituation = m_gridSituation[me.pos];
         std::string message;
